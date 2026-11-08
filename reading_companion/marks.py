@@ -118,6 +118,8 @@ class PageAnalysis:
     letter_h: float = 0.0       # median height of the body text's letters (flat px)
     skin: Optional[np.ndarray] = None        # fingers / a hand holding the book (flat px), painted out of the stripes
     skin_boxes: List[Tuple[int, int, int, int]] = field(default_factory=list)
+    figures: List[Tuple[int, int, int, int]] = field(default_factory=list)  # printed figures (maps, plans, photos), flat px
+    print_lines: List[TextLine] = field(default_factory=list)  # every printed row found, before validation (short lines too)
 
 
 # ---------------------------------------------------------------------------
@@ -1016,6 +1018,137 @@ def find_skin(an: "PageAnalysis", p: float) -> None:
         an.skin = cv2.dilate(((grown & (warm > 0)) | an.skin).astype(np.uint8), np.ones((3, 3), np.uint8)) > 0
 
 
+FIGURE_L = 82.0           # white-balanced L* below this (and near neutral) is figure ink or a halftone's grey
+FIGURE_MIN = 3.0          # a printed figure spans at least this many pitches across and down
+FIGURE_GAP_INK = 0.45     # text: the gaps between its lines (pen underlines taken out) hold less ink than this share of the lines' own
+
+
+def find_figures(an: "PageAnalysis", p: float) -> List[Tuple[int, int, int, int]]:
+    """Printed figures on the page: maps, plans, diagrams, photographs. Their grey ink hangs together over several pitches in
+    both directions, where print falls apart into letters a fraction of a pitch high (and a reader's note into words). Only
+    neutral grey counts (a highlighter's band is tinted); ink that touches the photo's border (the dark ground beyond the
+    page) or lies mostly outside the text column (a finger, the facing page, a page edge) is not a figure."""
+    lay = an.layout
+    h, w = an.Lw.shape
+    if lay is None:
+        return []
+    area = _row_mask(h, w, lay.page_l, lay.page_r) & an.valid
+    area[:lay.page_top] = False
+    area[lay.page_bottom + 1:] = False
+    C = np.hypot(an.aw, an.bw)
+    dark = (an.Lw < FIGURE_L) & (C < 12.0) & area
+    if an.skin is not None:
+        dark &= ~an.skin
+    k = odd(max(3, 0.25 * p))
+    m = cv2.morphologyEx(dark.astype(np.uint8), cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k)))
+    n, lab, st, _ = cv2.connectedComponentsWithStats(m, connectivity=8)
+    border = ~cv2.erode(an.valid.astype(np.uint8), np.ones((5, 5), np.uint8)).astype(bool)
+    border[:2] = border[-2:] = True
+    border[:, :2] = border[:, -2:] = True
+    col_l, col_r = float(np.median(lay.text_l)), float(np.median(lay.text_r))
+    boxes: List[List[int]] = []
+    for i in range(1, n):
+        x, y, ww, hh, _a = st[i]
+        if ww < FIGURE_MIN * p or hh < FIGURE_MIN * p:
+            continue
+        if min(x + ww, col_r) - max(x, col_l) < 0.6 * ww:
+            continue
+        sl = (slice(y, y + hh), slice(x, x + ww))
+        comp = lab[sl] == i
+        if (border[sl] & comp).sum() > 0.5 * max(ww, hh):
+            continue        # the dark ground beyond the page, along the photo's border
+        if _text_like(np.ones_like(comp), dark[sl], an.lines, y, p):   # all the ink in the box, not only this piece
+            continue
+        boxes.append([int(x), int(y), int(x + ww), int(y + hh)])
+    # parts of one figure (a map's land masses, a plan's rooms) close together are one figure
+    merged = True
+    while merged:
+        merged = False
+        for a_ in range(len(boxes)):
+            for b_ in range(a_ + 1, len(boxes)):
+                A, B = boxes[a_], boxes[b_]
+                if min(A[2], B[2]) - max(A[0], B[0]) > -1.0 * p and min(A[3], B[3]) - max(A[1], B[1]) > -1.0 * p:
+                    boxes[a_] = [min(A[0], B[0]), min(A[1], B[1]), max(A[2], B[2]), max(A[3], B[3])]
+                    boxes.pop(b_)
+                    merged = True
+                    break
+            if merged:
+                break
+    return [tuple(b) for b in boxes]
+
+
+def gap_ink(comp: np.ndarray, dark: np.ndarray, lines: List[TextLine], y0: int, p: float) -> Optional[float]:
+    """Ink in the gaps between the printed lines inside a figure candidate, relative to the ink on the lines (None: fewer
+    than three lines inside). Text leaves the gaps all but empty (a pen line in the margin or a descender at most); a
+    map, a plan or a photograph has ink between any two rows."""
+    ink = (comp & dark).astype(np.uint8)
+    # a pen's underline (or a table's rule) lies in a gap too: long thin horizontal strokes are taken out first
+    k = max(5, int(round(1.5 * p)))
+    rules = cv2.morphologyEx(ink, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (k, 1)))
+    thick = cv2.morphologyEx(rules, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (1, odd(max(3, 0.3 * p)))))
+    thin = cv2.dilate(rules & (1 - thick), np.ones((odd(max(3, 0.12 * p)), 3), np.uint8))
+    ink = (ink & (1 - thin)).astype(np.float32)
+    hh = ink.shape[0]
+    inside = [ln for ln in lines if y0 + 0.3 * p <= ln.center <= y0 + hh - 0.3 * p]
+    if len(inside) < 3:
+        return None
+    on, off = [], []
+    for a_, b_ in zip(inside, inside[1:]):
+        if b_.center - a_.center > 1.6 * p:
+            continue
+        c = int(a_.center - y0)
+        g = int((a_.center + b_.center) / 2.0 - y0)
+        r = max(1, int(0.06 * p))
+        on.append(ink[max(0, c - r):c + r + 1].mean())
+        off.append(ink[max(0, g - r):g + r + 1].mean())
+    if not on or max(np.mean(on), 1e-6) <= 1e-6:
+        return None
+    return float(np.mean(off) / max(np.mean(on), 1e-6))
+
+
+def _text_like(comp: np.ndarray, dark: np.ndarray, lines: List[TextLine], y0: int, p: float) -> bool:
+    g = gap_ink(comp, dark, lines, y0, p)
+    return g is not None and g < FIGURE_GAP_INK
+
+
+PRINT_LETTER_MAX = 1.65   # print beside the column: no letter taller than this many body letter heights
+
+
+def printed_beside(an: "PageAnalysis", mask: np.ndarray, x0: int, y0: int, p: float) -> bool:
+    """Ink in a side margin that is print, not handwriting: every letter-sized piece sits inside one printed row (from just
+    above its capitals to just below its descenders) and none is taller than print. This is a line's start or end that the
+    column edge missed (a curled page, hanging punctuation), a note number in the notes, a page number beside the running
+    head. Handwriting is larger than the print, or wanders across the gap between two rows."""
+    rows = an.print_lines or an.lines
+    xh = an.letter_h or 0.4 * p
+    if not rows:
+        return False
+    n, _lab, st, _ = cv2.connectedComponentsWithStats(mask.astype(np.uint8), connectivity=8)
+    comps = [st[i] for i in range(1, n) if st[i][4] >= 6 and st[i][3] >= 0.3 * xh]
+    if not comps:
+        return False
+    centers = np.array([ln.center for ln in rows], dtype=np.float64)
+    for _x, y, _w, h, _a in comps:
+        if h > PRINT_LETTER_MAX * xh:
+            return False
+        top, bot = y0 + y, y0 + y + h
+        c = centers[int(np.argmin(np.abs(centers - (top + bot) / 2.0)))]
+        if top < c - 0.55 * p or bot > c + 0.45 * p:
+            return False
+    return True
+
+
+def in_figure(an: "PageAnalysis", m: "Mark", p: float) -> bool:
+    """Most of the mark lies on a printed figure (or right against it: its caption, its scale bar, its labels)."""
+    area = max(1, (m.x1 - m.x0) * (m.y1 - m.y0))
+    for x0, y0, x1, y1 in an.figures:
+        ix = min(m.x1, x1 + p) - max(m.x0, x0 - p)
+        iy = min(m.y1, y1 + p) - max(m.y0, y0 - p)
+        if ix > 0 and iy > 0 and ix * iy >= 0.5 * area:
+            return True
+    return False
+
+
 def detect_marks(an: "PageAnalysis", geo: Geometry, segs: List[Segment]) -> None:
     """Fill an.marks (and an.rejected, for the review sheet)."""
     p = geo.pitch
@@ -1037,6 +1170,7 @@ def detect_marks(an: "PageAnalysis", geo: Geometry, segs: List[Segment]) -> None
     rejected: List[Mark] = []
 
     find_skin(an, p)
+    an.figures = find_figures(an, p)
 
     # ---- tinted strokes on the printed lines: highlights (and coloured underlines) ---------------
     tint = an.tint & search & ~an.skin
@@ -1119,6 +1253,16 @@ def detect_marks(an: "PageAnalysis", geo: Geometry, segs: List[Segment]) -> None
         if not pen_like(sg.lightness, sg.chroma) or (sg.y1 - sg.y0 > 0.5 * block_h and sg.chroma < 25.0):
             rejected.append(m)
             continue
+        if sg.x1 - sg.x0 < 0.15 * p:
+            m.why = "a hairline (a page's edge)"
+            rejected.append(m)
+            continue
+        if sg.x0 - lay.page_l[yc] < 0.15 * p or lay.page_r[yc] - sg.x1 < 0.15 * p:
+            # a pen line is drawn on the paper; one that runs along the page's edge is the edge itself, the facing page's,
+            # or the rim of the finger holding the page there
+            m.why = "on the page edge (an edge or a finger's rim)"
+            rejected.append(m)
+            continue
         marks.append(m)
 
     marks = _merge_same(marks, p)
@@ -1153,7 +1297,8 @@ def detect_marks(an: "PageAnalysis", geo: Geometry, segs: List[Segment]) -> None
         reasons = [r for r, bad in (("near page edge", not clear[sl][comp].all()), ("not pen", not pen_like(L_, C_)),
                                     ("too tall", hh > 12 * p), ("lone tall stroke", lone_tall),
                                     ("thick", not stroke_like(sel, p)),
-                                    ("not on paper", not on_paper(an, x, y, x + ww, y + hh, marg, p))) if bad]
+                                    ("not on paper", not on_paper(an, x, y, x + ww, y + hh, marg, p)),
+                                    ("print on a printed row", printed_beside(an, sel, x, y, p))) if bad]
         if reasons:
             m.why = ", ".join(reasons)
             rejected.append(m)
@@ -1172,6 +1317,18 @@ def detect_marks(an: "PageAnalysis", geo: Geometry, segs: List[Segment]) -> None
             m.where = where
             m.why = g.why
             marks.append(m)
+
+    # ---- printed figures: what lies on a map, a plan or a photograph is print, not the reader's -----------------------
+    if an.figures:
+        kept = []
+        for m in marks:
+            vivid = m.kind in ("highlight", "underline") and m.chroma >= 20.0   # a highlighter is never part of the print
+            if not vivid and in_figure(an, m, p):
+                m.why = (m.why + "; " if m.why else "") + "on a printed figure"
+                rejected.append(m)
+            else:
+                kept.append(m)
+        marks = kept
 
     an.marks = sorted(marks, key=lambda m: (m.y0, m.x0))
     an.rejected = rejected
@@ -1237,6 +1394,7 @@ def analyse(flat: np.ndarray, geo: Geometry) -> PageAnalysis:
     band = cv2.dilate(V, cv2.getStructuringElement(cv2.MORPH_RECT, (odd(geo.pitch), 3))).astype(np.float32)
     letters = (ink & ~tint) | (tint & (V < 0.75 * band))
     an.lines, an.head_lines = validate_lines(cand, letters & valid, blk, geo.pitch)
+    an.print_lines = list(cand)
     lay, segs = build_layout(an, geo)
     an.layout = lay
     an.letter_h = body_letter_height(ink, an.lines, blk, geo.pitch)
