@@ -340,7 +340,7 @@ def detect_book_title(metas: Sequence[PageMeta], folder_name: str = "", book_tit
     fk = norm_key(folder_name)
     if fk:
         for m, k in heads:
-            if k and (similar(k, fk) or (len(k) >= 5 and (k in fk or fk in k))):
+            if k and (similar(k, fk) or (len(k) >= 5 and k in fk)):
                 return m.running_head, "folder_name"
     counts = Counter(k for _, k in heads if k)
     for k, c in counts.most_common():

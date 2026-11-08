@@ -2,7 +2,7 @@
 with a page number, highlights, an underline, a margin line and a handwritten note."""
 from __future__ import annotations
 
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, Union
 
 import cv2
 import numpy as np
@@ -18,7 +18,7 @@ def make_page(n_lines: int = 24, highlight: Optional[Dict[int, str]] = None, und
               margin_line: Optional[Tuple[int, int]] = None, note_beside: Optional[int] = None,
               head: str = "224          WAYFINDING", angle: float = 0.0, seed: int = 3,
               width: int = 1500, height: int = 2000, underline_color: Optional[Tuple[int, int, int]] = None,
-              finger: Optional[Tuple[int, int]] = None) -> Tuple[np.ndarray, Dict]:
+              finger: Union[None, bool, Tuple[int, int]] = None) -> Tuple[np.ndarray, Dict]:
     """RGB page photo-like image and the truth: {"lines": [(y_center, x0, x1)], ...}.
     ``highlight`` maps 1-based line -> colour name."""
     rng = np.random.default_rng(seed)
@@ -89,7 +89,7 @@ def make_page(n_lines: int = 24, highlight: Optional[Dict[int, str]] = None, und
     a = (ink.astype(np.float32) / 255.0)[..., None]
     img = img * (1 - a) + np.array([35, 33, 30], np.float32) * a
     # a finger holding the page beside lines a..b: it comes in over the page's right edge from the table beyond it
-    if finger:
+    if isinstance(finger, tuple):
         edge = x1 + 120
         img[:, edge:] = np.array([58, 56, 62], np.float32)
         ya = lines[finger[0] - 1][0] - 30
@@ -99,6 +99,13 @@ def make_page(n_lines: int = 24, highlight: Optional[Dict[int, str]] = None, und
         shade = np.linspace(0.75, 1.0, width, dtype=np.float32)[None, :, None]
         s_ = (cv2.GaussianBlur(skin, (0, 0), 3).astype(np.float32) / 255.0)[..., None]
         img = img * (1 - s_) + np.array([196, 132, 98], np.float32) * shade * s_
+    elif finger:  # True: a thumb holding the page, over the right end of lines 9-13
+        fm = np.zeros((height, width), np.uint8)
+        yc = lines[10][0]
+        cv2.ellipse(fm, (x1 - 20, yc), (120, 170), 0, 0, 360, 255, -1)
+        f_ = cv2.GaussianBlur(fm, (0, 0), 6).astype(np.float32)[..., None] / 255.0
+        shade = (0.85 + 0.15 * (xx[..., None] - (x1 - 140)) / 260.0).clip(0.7, 1.0)
+        img = img * (1 - f_) + np.array([196, 132, 104], np.float32) * shade * f_
     img = np.clip(img, 0, 255).astype(np.uint8)
     if angle:
         M = cv2.getRotationMatrix2D((width / 2, height / 2), angle, 1.0)

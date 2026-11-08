@@ -4,4 +4,4 @@ Deterministic image processing only (no OCR for the marks, no machine learning).
 optionally, to read the printed page number and chapter for the file names and the words you marked.
 """
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"

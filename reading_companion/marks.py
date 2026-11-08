@@ -631,7 +631,8 @@ def build_layout(an: "PageAnalysis", geo: Geometry) -> Tuple[Layout, List[Segmen
     vmid = (blk.y0 + blk.y1) / 2.0
     for ch in chain_segments(segs, p):
         span = max(c.y1 for c in ch) - min(c.y0 for c in ch)
-        if span >= 0.45 * block_h or (len(ch) >= 3 and span >= 0.3 * block_h):
+        coloured = float(np.median([c.chroma for c in ch])) >= 25.0
+        if not coloured and (span >= 0.45 * block_h or (len(ch) >= 3 and span >= 0.3 * block_h)):
             a_, b_ = _chain_line(ch)
             xs_ = a_ + b_ * rows
             mid = a_ + b_ * vmid
@@ -924,6 +925,13 @@ def _mark(kind, x0, y0, x1, y1, L_, C_, H_, rgb, area) -> Mark:
     return Mark(kind, int(x0), int(y0), int(x1), int(y1), color_name(H_, C_, L_), H_, C_, L_, rgb, int(area), yc=(y0 + y1) / 2.0)
 
 
+def skin_like(hue: float, L_: float) -> bool:
+    """A finger over the page: a warm hue and too dark for highlighter. Highlighter is
+    translucent, so even orange, pink and red ink on paper stays light (white-balanced
+    L* about 70-97); skin, in light or shade, is darker (L* about 30-62)."""
+    return 5.0 <= hue <= 60.0 and L_ < 66.0
+
+
 def pen_like(L_: float, C_: float) -> bool:
     return L_ <= 45.0 or (C_ >= 22.0 and L_ <= 78.0)
 
@@ -1066,7 +1074,8 @@ def detect_marks(an: "PageAnalysis", geo: Geometry, segs: List[Segment]) -> None
                 continue
         elif (ww < 1.0 * p or hh < 0.15 * p or inside < 0.5 or C_ < HL_COMPONENT_CHROMA
               or not _on_lines(an, y, y + hh, p)
-              or (hh > 1.6 * p and (area / float(ww * hh)) > 0.85 and ww < 4 * p)):
+              or (hh > 1.6 * p and (area / float(ww * hh)) > 0.85 and ww < 4 * p)
+              or skin_like(H_, L_)):
             rejected.append(m)
             continue
         marks.append(m)
@@ -1107,7 +1116,7 @@ def detect_marks(an: "PageAnalysis", geo: Geometry, segs: List[Segment]) -> None
             continue
         if lay.text_l[yc] - 0.1 * p < sg.xc < lay.text_r[yc] + 0.1 * p:
             continue  # inside the text: printed glyphs (drop caps, brackets), not a margin line
-        if not pen_like(sg.lightness, sg.chroma) or sg.y1 - sg.y0 > 0.5 * block_h:
+        if not pen_like(sg.lightness, sg.chroma) or (sg.y1 - sg.y0 > 0.5 * block_h and sg.chroma < 25.0):
             rejected.append(m)
             continue
         marks.append(m)

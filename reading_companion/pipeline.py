@@ -19,7 +19,7 @@ from .geometry import Geometry, build_geometry
 from .imageio import load_rgb, save_stripe
 from .marks import PageAnalysis, analyse
 from .metadata import PageMeta, PrintRow, consolidate, read_page
-from .naming import DEFAULT_TEMPLATE, chapter_label, list_images, stripe_name, unique
+from .naming import DEFAULT_TEMPLATE, chapter_label, list_images, natural_key, slug, stripe_name, unique
 from .ocr import OcrEngine, get_engine
 
 OUT_DIRNAME = "reading-companion"
@@ -340,8 +340,9 @@ def _kind_colors(b: Band) -> List[Tuple[str, str]]:
     return seen
 
 
-def _clean_previous(out_dir: Path) -> None:
-    """Remove the files a previous run listed in its manifest (only those)."""
+def _clean_previous(out_dir: Path, keep_sources=()) -> None:
+    """Remove the files a previous run listed in its manifest (only those, and only inside the
+    output folder); stripes of photos in ``keep_sources`` stay (a re-run of some photos)."""
     man = out_dir / "manifest.json"
     if not man.exists():
         return
@@ -349,16 +350,28 @@ def _clean_previous(out_dir: Path) -> None:
         old = json.loads(man.read_text(encoding="utf-8"))
     except Exception:
         return
-    for rec in old.get("stripes", []):
-        f = out_dir / rec.get("file", "")
-        if f.is_file() and f.parent == out_dir:
+    if not isinstance(old, dict):
+        return
+    root = out_dir.resolve()
+    review = (out_dir / "review").resolve()
+
+    def remove(rel, allowed: Path) -> None:
+        if not rel or not isinstance(rel, str):
+            return
+        f = (out_dir / rel).resolve()
+        if f.parent == allowed and f.suffix.lower() == ".jpg" and f.is_file():
             f.unlink()
-    for rec in old.get("pages", []):
-        r = rec.get("review")
-        if r:
-            f = out_dir / r
-            if f.is_file() and out_dir in f.parents:
-                f.unlink()
+
+    keep = set(keep_sources or ())
+    for rec in old.get("stripes", []) if isinstance(old.get("stripes"), list) else []:
+        if isinstance(rec, dict) and rec.get("source") not in keep:
+            remove(rec.get("file"), root)
+    for rec in old.get("pages", []) if isinstance(old.get("pages"), list) else []:
+        if isinstance(rec, dict) and rec.get("file") not in keep:
+            remove(rec.get("review"), review)
+    idx = out_dir / "index.html"
+    if idx.is_file():
+        idx.unlink()
 
 
 def process_folder(folder: Path, out_dir: Optional[Path] = None, opts: Optional[Options] = None,
@@ -368,7 +381,8 @@ def process_folder(folder: Path, out_dir: Optional[Path] = None, opts: Optional[
     opts = opts or Options()
     folder = Path(folder)
     out_dir = Path(out_dir) if out_dir else folder / OUT_DIRNAME
-    images = [Path(f) for f in files] if files else list_images(folder, exclude=[out_dir])
+    images = (sorted((Path(f) for f in files), key=lambda p: natural_key(p.name)) if files
+              else list_images(folder, exclude=[out_dir]))
     engine, ocr_note = (engine, "") if engine is not None else get_engine(opts.ocr, opts.languages, opts.ocr_bin)
     t0 = time.time()
     results: List[PageResult] = []
@@ -379,11 +393,23 @@ def process_folder(folder: Path, out_dir: Optional[Path] = None, opts: Optional[
     book = consolidate([r.meta for r in results], folder.name, opts.book_title)
 
     out_dir.mkdir(parents=True, exist_ok=True)
-    _clean_previous(out_dir)
+    # a run on some photos of a folder keeps what an earlier run made for the other photos
+    carried_pages, carried_stripes = [], []
+    if files:
+        prev = out_dir / "manifest.json"
+        try:
+            old = json.loads(prev.read_text(encoding="utf-8")) if prev.exists() else {}
+        except Exception:
+            old = {}
+        now = {p.name for p in images}
+        if isinstance(old, dict):
+            carried_pages = [p for p in old.get("pages", []) if isinstance(p, dict) and p.get("file") not in now]
+            carried_stripes = [s for s in old.get("stripes", []) if isinstance(s, dict) and s.get("source") not in now]
+    _clean_previous(out_dir, keep_sources={p.get("file") for p in carried_pages})
     review_dir = out_dir / "review"
     if opts.review:
         review_dir.mkdir(exist_ok=True)
-    taken: set = set()
+    taken: set = {p.name for p in images} if out_dir.resolve() == folder.resolve() else set()
     stripes_out: List[Dict] = []
     pages_out: List[Dict] = []
     seq = 0
@@ -394,7 +420,8 @@ def process_folder(folder: Path, out_dir: Optional[Path] = None, opts: Optional[
         chapter = chapter_label(m.chapter_number, m.chapter_title)
         for k, (b, img, poly) in enumerate(zip(r.bands, r.stripes, r.polygons), 1):
             seq += 1
-            name = unique(stripe_name(opts.name_template, r.path.stem, chapter, m.page_number or "", k, len(r.bands), seq,
+            stem = r.path.stem if slug(r.path.stem) else f"page{r.index}"
+            name = unique(stripe_name(opts.name_template, stem, chapter, m.page_number or "", k, len(r.bands), seq,
                                       book.get("title") or ""), taken)
             rec = {
                 "file": name, "seq": seq, "source": r.path.name, "source_index": r.index,
@@ -419,13 +446,19 @@ def process_folder(folder: Path, out_dir: Optional[Path] = None, opts: Optional[
             rec["source_polygon"] = poly
             desc = _describe(book.get("title"), m, k, len(r.bands), b, r.path.name)
             emb = {k2: v for k2, v in rec.items() if k2 not in ("source_polygon", "marks", "text")}
-            save_stripe(out_dir / name, img, desc, emb, software, r.info.get("captured"), opts.quality)
+            keywords = [book.get("title") or "",
+                        ("chapter " + (m.chapter_number or m.chapter_title)) if (m.chapter_number or m.chapter_title) else "",
+                        f"p. {m.page_number}" if m.page_number else ""]
+            # the caption: the printed words the reader marked (never handwriting); the summary when nothing was read
+            save_stripe(out_dir / name, img, desc, emb, software, r.info.get("captured"), opts.quality,
+                        caption=rec["passage"] or "", keywords=keywords)
             stripes_out.append(rec)
             names.append(name)
         review_name = None
         if opts.review and r.review is not None:
-            review_name = f"review/{r.index:03d}_{r.path.stem}.jpg"
-            cv2.imwrite(str(out_dir / review_name), r.review, [cv2.IMWRITE_JPEG_QUALITY, 82])
+            review_name = f"review/{r.index:03d}_{(slug(r.path.stem, 80) or 'page')}.jpg"
+            if not cv2.imwrite(str(out_dir / review_name), r.review, [cv2.IMWRITE_JPEG_QUALITY, 82]):
+                review_name = None
         pages_out.append({
             "index": r.index, "file": r.path.name, "stripes": names, "review": review_name,
             **m.as_dict(), **{k2: v for k2, v in r.info.items() if k2 != "traceback"},
@@ -440,8 +473,8 @@ def process_folder(folder: Path, out_dir: Optional[Path] = None, opts: Optional[
                     "book_title": opts.book_title, "text": opts.text},
         "ocr": {"engine": engine.name, "version": engine.version, "note": ocr_note or None},
         "book": book,
-        "pages": pages_out,
-        "stripes": stripes_out,
+        "pages": sorted(pages_out + carried_pages, key=lambda p: natural_key(str(p.get("file", "")))),
+        "stripes": stripes_out + carried_stripes,
         "seconds": round(time.time() - t0, 1),
     }
     (out_dir / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=1), encoding="utf-8")
@@ -454,7 +487,14 @@ def process_folder(folder: Path, out_dir: Optional[Path] = None, opts: Optional[
 
 def write_review_html(out_dir: Path, manifest: Dict) -> None:
     """index.html next to the stripes: each photo with its stripes outlined, then the stripes."""
-    e = html.escape
+    from urllib.parse import quote
+
+    def e(t) -> str:
+        return html.escape(str(t))
+
+    def src(t) -> str:
+        return html.escape(quote(str(t)))
+
     passage = {s["file"]: s.get("passage") for s in manifest["stripes"]}
     rows = []
     for pg in manifest["pages"]:
@@ -466,10 +506,10 @@ def write_review_html(out_dir: Path, manifest: Dict) -> None:
         ] if x)
         err = f"<p class=err>{e(pg['error'])}</p>" if pg.get("error") else ""
         strips = "".join(
-            f"<figure><img src='{e(s)}' loading=lazy><figcaption>{e(s)}</figcaption>"
+            f"<figure><img src='{src(s)}' loading=lazy><figcaption>{e(s)}</figcaption>"
             + (f"<blockquote>{e(passage[s])}</blockquote>" if passage.get(s) else "") + "</figure>" for s in pg["stripes"]
         ) or "<p class=none>no marks found</p>"
-        rev = f"<img class=page src='{e(pg['review'])}' loading=lazy>" if pg.get("review") else ""
+        rev = f"<img class=page src='{src(pg['review'])}' loading=lazy>" if pg.get("review") else ""
         rows.append(f"<section><h2>{pg['index']}. {e(pg['file'])}</h2><p class=meta>{e(meta)}</p>{err}"
                     f"<div class=grid>{rev}<div class=strips>{strips}</div></div></section>")
     book = manifest.get("book") or {}

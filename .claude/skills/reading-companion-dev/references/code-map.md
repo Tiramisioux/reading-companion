@@ -15,6 +15,7 @@ All paths are relative to the repository root. Line numbers drift; search for th
 | stripes | `make_bands`, `cut_stripe`, `paint_out` | `bands.py` | consecutive marked lines grouped (`GAP_BREAK = 1.7` pitches), context lines added (`CONTEXT_GAP = 4.0`), full-width cut through the straightening map, fingers painted out with the rows' paper colour |
 | print rows | `print_rows`, `row_image` | `pipeline.py` | which ink groups outside the body are OCR'd (running head, folio, chapter heading) |
 | marked text | `line_row`, `row_image(tight=True, dark=…)`, `dark_highlight`, `marked_words` | `pipeline.py` | the marked body lines, one OCR call per page with the print rows; brightest channel against the local light (a dark highlighter also stretched against the darkest print near it); whole words ≥ 60 % covered |
+| caption | `save_stripe(…, caption=, keywords=)` | `imageio.py` | the passage (the marked printed words) → IPTC Caption-Abstract, XMP dc:description, EXIF ImageDescription (UTF-8); summary → Headline / dc:title; book, chapter, page → keywords. **Handwriting is never OCR'd** (user rule 2026-11-08): a margin note's stripe gets the summary as caption, and `print_rows` skips handwritten groups |
 | page meta | `read_page` | `metadata.py` | page number from header/footer (`FOLIO_RE`, roman numerals), running head, chapter opening |
 
 ## Pipeline, the folder (`process_folder`)
