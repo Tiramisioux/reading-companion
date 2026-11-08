@@ -1,8 +1,8 @@
 """Apple Vision backend (macOS): builds ``rc-vision`` from ``rc_vision.swift`` with ``swiftc`` on
 first use (cached), then reads all row images of a page in one call.
 
-The helper prints the same line shape as the note-ingest ``ni-vision`` tool (top-left,
-normalised coordinates), so ``--ocr-bin /path/to/rc-vision`` may point at a prebuilt copy.
+The helper prints one JSON line per image (text lines with top-left, normalised
+coordinates); ``--ocr-bin /path/to/rc-vision`` may point at a prebuilt copy.
 """
 from __future__ import annotations
 

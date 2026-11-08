@@ -59,6 +59,7 @@ chapter number when known, otherwise the title (`chapter_epilogue`).
 ## Install (macOS)
 
 ```bash
+git clone https://github.com/Tiramisioux/reading-companion.git
 cd reading-companion
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
@@ -179,3 +180,7 @@ Photos of book pages are copyrighted: keep them and their ground truth out of th
 - Pencil (light grey) notes are fainter than the ink threshold and may be missed.
 - One page per photo: on a two-page spread only the larger/denser page is processed.
 - Apple Vision OCR is built and run on macOS only; the tests use Tesseract or none.
+
+## License
+
+MIT (see `LICENSE`).
