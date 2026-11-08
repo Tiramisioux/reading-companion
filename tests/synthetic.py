@@ -16,7 +16,7 @@ HIGHLIGHTS = {"yellow": (255, 236, 90), "teal": (90, 200, 215), "pink": (250, 15
 
 def make_page(n_lines: int = 24, highlight: Optional[Dict[int, str]] = None, underline: Tuple[int, ...] = (),
               margin_line: Optional[Tuple[int, int]] = None, note_beside: Optional[int] = None,
-              head: str = "224          WAYFINDING", angle: float = 0.0, seed: int = 3,
+              head: str = "224          WAYFINDING", angle: float = 0.0, seed: int = 3, finger: bool = False,
               width: int = 1500, height: int = 2000) -> Tuple[np.ndarray, Dict]:
     """RGB page photo-like image and the truth: {"lines": [(y_center, x0, x1)], ...}.
     ``highlight`` maps 1-based line -> colour name."""
@@ -79,6 +79,13 @@ def make_page(n_lines: int = 24, highlight: Optional[Dict[int, str]] = None, und
         cv2.polylines(ink, [np.array(pts, np.int32)], False, 255, 3, cv2.LINE_AA)
     a = (ink.astype(np.float32) / 255.0)[..., None]
     img = img * (1 - a) + np.array([35, 33, 30], np.float32) * a
+    if finger:  # a thumb holding the page, over the right end of lines 9-13
+        fm = np.zeros((height, width), np.uint8)
+        yc = lines[10][0]
+        cv2.ellipse(fm, (x1 - 20, yc), (120, 170), 0, 0, 360, 255, -1)
+        f_ = cv2.GaussianBlur(fm, (0, 0), 6).astype(np.float32)[..., None] / 255.0
+        shade = (0.85 + 0.15 * (xx[..., None] - (x1 - 140)) / 260.0).clip(0.7, 1.0)
+        img = img * (1 - f_) + np.array([196, 132, 104], np.float32) * shade * f_
     img = np.clip(img, 0, 255).astype(np.uint8)
     if angle:
         M = cv2.getRotationMatrix2D((width / 2, height / 2), angle, 1.0)

@@ -27,7 +27,8 @@ class OcrEngine:
     name = "none"
     version = ""
 
-    def read(self, images: Sequence[np.ndarray]) -> List[List[Word]]:
+    def read(self, images: Sequence[np.ndarray], mode: str = "line") -> List[List[Word]]:
+        """mode "line": each image is one printed line; "block": several lines (a stripe)."""
         return [[] for _ in images]
 
 

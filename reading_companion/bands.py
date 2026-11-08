@@ -23,7 +23,7 @@ from .geometry import Geometry
 from .marks import Mark, PageAnalysis, TextLine
 
 GAP_BREAK = 1.7      # marked lines further apart than this many pitches (blank space) are not consecutive
-CONTEXT_GAP = 4.0    # a context line further than this many pitches away (a figure, a big gap) is left out
+CONTEXT_GAP = GAP_BREAK  # context stops at a section break or figure: the next section is not context
 NEAR_EDGE = 12.0     # a top/bottom note further than this many pitches from the text stands alone
 JOIN_GAP = 2.5       # a top/bottom note this close to the first/last line is consecutive with it
 

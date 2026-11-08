@@ -58,7 +58,7 @@ class VisionEngine(OcrEngine):
         self.languages = languages or "en-US,sv-SE"
         self.version = f"Apple Vision ({self.binary.name})"
 
-    def read(self, images: Sequence[np.ndarray]) -> List[List[Word]]:
+    def read(self, images: Sequence[np.ndarray], mode: str = "line") -> List[List[Word]]:
         if not images:
             return []
         with tempfile.TemporaryDirectory(prefix="rc-vision-") as tmp:

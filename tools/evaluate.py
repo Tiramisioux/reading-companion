@@ -73,9 +73,18 @@ def main() -> int:
                 tot["excl_bad"] += bad
                 note = f"adjacent-line points inside: {bad}/{len(ex)}"
             else:
-                bad = int((~ex).sum())
+                # a neighbouring line across a section break is not context (bands.CONTEXT_GAP)
+                from reading_companion.bands import CONTEXT_GAP
+                pts = np.array(s["exclude_points"], dtype=np.float64).reshape(-1, 2)
+                _, vv = res.geo.source_to_flat(pts[:, 0], pts[:, 1]) if len(pts) else (None, np.zeros(0))
+                lines = {ln.index: ln.center for ln in res.analysis.lines}
+                top_c = lines.get(b.first_line, b.y0)
+                bot_c = lines.get(b.last_line, b.y1)
+                p = res.geo.pitch
+                beyond = np.array([(v < top_c - CONTEXT_GAP * p) or (v > bot_c + CONTEXT_GAP * p) for v in vv], dtype=bool)
+                bad = int((~ex & ~beyond).sum())
                 tot["ctx_bad"] += bad
-                note = f"context points outside: {bad}/{len(ex)}"
+                note = f"context points outside: {bad}/{len(ex)}" + (f" ({int(beyond.sum())} across a section break)" if beyond.any() else "")
             lines_out.append(f"  ok lines {s['first_line']}-{s['last_line']} -> stripe {best + 1} "
                              f"(marked {b.first_line}-{b.last_line}, shown {b.ctx_first}-{b.ctx_last}), cover {frac:.0%}, {note}")
         extra = [i for i in range(len(res.bands)) if i not in used]
