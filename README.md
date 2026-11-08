@@ -103,6 +103,38 @@ Options: `--out DIR`, `--context N`, `--ocr auto|vision|tesseract|none`, `--lang
   `reading_companion.imageio.read_stripe_meta(path)` reads it back
 - XMP: `dc:title`, `dc:description`, `dc:source` and `rc:*` fields
 
+## Right-click a folder in Finder (macOS)
+
+`macos/quick-action.zsh` runs the extractor on the folders (or photos) selected in Finder,
+shows a notification with the number of stripes and opens the review page. Set it up once in
+Automator: *New → Quick Action*, "Workflow receives current **files or folders** in **Finder**",
+add *Run Shell Script* (shell `/bin/zsh`, pass input **as arguments**) with the body
+
+```bash
+"$HOME/path/to/reading-companion/macos/quick-action.zsh" "$@"
+```
+
+Settings by environment: `RC_HOME`, `RC_PYTHON` (default `.venv/bin/python`), `RC_ARGS`
+(e.g. `--context 2`), `RC_LOG` (default `~/Library/Logs/reading-companion.log`).
+
+## For an Obsidian ingest step
+
+What a later ingest can rely on (this tool writes nothing into a vault):
+
+- `manifest.json` → `stripes[]`, in reading order (`seq`): `file`, `source` (the photo),
+  `note` / `notes_on_page`, `page_number` (+ `page_number_source`), `chapter`
+  (`number`, `title`, `source`), `running_head`, `book`, `lines_marked`, `lines_shown`,
+  `kinds`, `colors`, `marks[]`, `size`, `source_polygon` (where the stripe sits on the photo).
+- `manifest.json` → `pages[]`: per photo what was read (page number, running head, chapter,
+  OCR rows), its stripes, skew and line pitch, and `error` when a photo could not be read.
+- Each stripe JPEG carries the same record (EXIF `UserComment`, read it with
+  `reading_companion.imageio.read_stripe_meta`) and a readable summary (EXIF
+  `ImageDescription`, XMP `dc:description`), so a stripe moved out of its folder still knows
+  where it came from.
+- Highlight colours are reported as names (`yellow`, `orange`, `pink`, `red`, `green`, `teal`,
+  `blue`, `purple`; pen ink `black`/`grey`), so a colour code (yellow = quote, pink = disagree, …)
+  can be mapped in the ingest.
+
 ## How it works
 
 1. **Geometry**: ink relative to the local paper lightness; skew by projection-profile
