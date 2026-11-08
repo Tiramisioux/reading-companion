@@ -233,6 +233,12 @@ photos against hand-made ground truth (probe points on the marked lines and thei
 Photos of book pages are copyrighted: keep them and their ground truth out of the repository
 (`local/` is git-ignored).
 
+`tests/fixtures/wayfinding_labels.json` holds 270 stripes of one real book labelled by hand (79 false
+positives, 191 true: the reader unticked the stripes that were not their marks in note-ingest's import
+window), with reading-companion's geometry and mark records but no images and no book text. The photos and
+stripes are in the private repository `Tiramisioux/reading-companion-fixtures` (`wayfinding/`), for those
+who have access.
+
 ## Known limits
 
 - The page's outer edge is not always visible; then the stripe extends a fixed 25 % of the text
