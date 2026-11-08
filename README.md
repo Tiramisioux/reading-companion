@@ -22,10 +22,39 @@ img_2004_note1.jpg                (no page number printed on the photo)
 | `highlight` | highlighter of any colour over the text | colour after a local white balance against the paper |
 | `underline` | a pen stroke under a printed line | long thin horizontal ink with printed text right above it |
 | `margin_line` | a vertical pen line beside lines (often doubled, red or black) | long thin vertical ink outside the text column |
-| `margin_note` | handwriting in the side, top or bottom margin | pen ink on bare paper; in the top/bottom margins it must look handwritten (joined letters, wandering baseline) so printed running heads, page numbers and chapter titles are not taken for notes |
+| `margin_note` | handwriting in the side, top or bottom margin, in a gap between paragraphs, or written sideways up the margin | pen ink on the page's paper, outside the printed rows; it must not be print (letters at print size inside a printed row, letters on a straight baseline, a caption beside a figure) and, in the top/bottom margins and inside the column, must look handwritten (joined letters, wandering baseline) so printed running heads, page numbers and chapter titles are not taken for notes |
 
 Not marks: bleed-through from the other side of the leaf, the facing page, fingers, shadows,
 printed rules, the running head and page number.
+
+### Where handwriting is looked for
+
+A note can be anywhere on the page's **paper**: the bright paper region of the photographed page itself (print,
+highlights and notes are holes in it), without the fingers holding it and without anything across the gutter. The
+paper says where the page ends; the page-edge estimates stop short of it on a curled, tightly cropped page, which is
+where a note in the outer margin is. Outside the printed rows means: in the margins, above and below the text, in the
+gap between two paragraphs, and right against a line's start or end. A line of handwriting just under (or over) the
+text has letter texture too and is first taken for a printed line; the first and last lines, when they stand apart,
+are tested for handwriting and given back to the notes. A phone renders a pen's deepest black as pure 0: such pixels
+are ink of a note, not a hole in the photo. A stripe holding a note reaches past it, to the paper's edge if need be.
+
+### Print that looks like a mark
+
+Measured on 270 hand-labelled stripes of one real book (see Tests), most false stripes were print:
+
+- **Printed figures** (maps, floor plans, diagrams, photographs, reproduced sketch maps) are found as grey ink that
+  hangs together over at least 3 × 3 line pitches in the text column and has ink in the gaps between its rows
+  (text leaves those gaps empty, once pen underlines are taken out). Nothing on a figure, or right against it (its
+  caption, scale bar or labels), is a mark, except a vivid highlighter or coloured underline. The figures are
+  in the debugging analysis (`analysis.figures`).
+- **Printed rules** (a table's or a footnote's) are ruler-straight across the whole column: an underline that
+  spans 85 % of the column and stays within 0.16 of a pitch top to bottom is a rule. A pen wobbles over that length.
+- **Print beside the column** (a line's start or end that the column edge missed on a curled page, a note number in
+  the notes, a page number, a running head or footnote taken for a note): when every letter of a would-be note sits
+  inside one printed row and none is taller than print (1.65 body letter heights), it is print. Handwriting is
+  larger, or crosses the gap between rows.
+- **Page edges and fingers' rims**: a margin line that runs along the page's edge is the edge itself (this page's or
+  the facing page's) or the rim of the finger holding the page there, and a hairline next to the edge is an edge.
 
 ### Fingers holding the book
 
@@ -210,8 +239,9 @@ stderr (its progress bar), the one summary line on stdout (`stripes`, `errors`),
    not lines; thin pen rules are taken out first, so three underlined lines stay three lines, and
    under a dark highlighter the letters are what is darker than the highlighter beside them), the running head, the column edges (they may slant with perspective), the page
    edges and the gutter.
-4. **Marks**: fingers first (skin colour cut off by the page edge), then the highlight, underline,
-   margin line and note detectors (above), each mark assigned to the printed lines it touches.
+4. **Marks**: fingers first (skin colour cut off by the page edge) and printed figures, then the highlight,
+   underline, margin line and note detectors (above), with printed rules, print beside the column and page edges
+   turned down, and whatever lies on a figure; each mark assigned to the printed lines it touches.
 5. **Stripes**: consecutive marked lines grouped, context lines added, cut from the
    full-resolution photo through the straightening map, fingers painted out.
 6. **Metadata**: OCR of the printed rows above and below the text; then the folder is read as
@@ -237,7 +267,26 @@ Photos of book pages are copyrighted: keep them and their ground truth out of th
 positives, 191 true: the reader unticked the stripes that were not their marks in note-ingest's import
 window), with reading-companion's geometry and mark records but no images and no book text. The photos and
 stripes are in the private repository `Tiramisioux/reading-companion-fixtures` (`wayfinding/`), for those
-who have access.
+who have access. `tests/fixtures/wayfinding_fp_categories.json` gives each false positive a category and lists
+the true positives that, looked at on the photo, carry no mark (label noise). Score the extractor against them:
+
+```bash
+.venv/bin/python tools/score_labels.py ../reading-companion-fixtures/wayfinding --jobs 3 [--list] [--report r.json]
+```
+
+It reads every photo (no OCR), matches each stripe to the labelled ones of the same photo by vertical overlap of
+their outlines (IoU ≥ 0.5), and reports recall on the true positives (also without the label noise), the false
+positives left per category, and stripes that match no label (suspect). On 0.4.0:
+
+| | true positives found | with a mark | false positives left | unlabelled |
+|---|---|---|---|---|
+| 0.3.0 | 191/191 | 180/180 | 76/79 | 8 |
+| 0.4.0 | 180/191 | 180/180 | 10/79 | 9 |
+
+The 11 true positives 0.4.0 no longer gives carry no reader's mark: the rim of a thumb (3), printed line starts and
+note numbers (5), printed figures (3). The labels only know the stripes 0.3.0 made: 8 of the 9 unlabelled stripes are
+handwriting 0.3.0 missed (a look through all 142 photos found the reader's pen notes or lines missed on 19 of them;
+0.4.0 finds them on all 19, two of them in part), the ninth is on the book's cover.
 
 ## Known limits
 
@@ -246,6 +295,12 @@ who have access.
 - Handwriting in the top/bottom margins is told from print by shape; a very short note there
   (one or two letters) can be missed. Notes in the side margins are found whatever their size.
 - Pencil (light grey) notes are fainter than the ink threshold and may be missed.
+- A note written against a finger holding the page, or right at the paper's edge, is turned down with the finger or
+  the edge; so is a margin line drawn right along the page's edge. A note written on or beside a printed figure
+  (within 2.5 pitches) is turned down as its caption or label.
+- A note's part written very close to a printed row, at print size and in separate letters, can be taken for print;
+  the rest of the note still gives the stripe. A bracket drawn in the margin as a thin line with a tick is not found.
+- Large print (a chapter title, a heading in the back matter) in the top margin can still be taken for a note.
 - One page per photo: on a two-page spread only the larger/denser page is processed.
 - Apple Vision OCR is built and run on macOS only; the tests use Tesseract or none.
 - Words under a very dark highlighter (deep red) are read less reliably than plain print; the

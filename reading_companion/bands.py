@@ -208,9 +208,11 @@ def make_bands(an: PageAnalysis, geo: Geometry, context: int = 1) -> List[Band]:
             x0 = float(np.max(lay.page_l[r0:r1]))
             x1 = float(np.min(lay.page_r[r0:r1]))
             for m in b.marks:
+                # a mark in the margin is on the page's paper: the stripe reaches past it, even where the page-edge
+                # estimate stopped short of the paper's edge (a curled, tightly cropped page)
                 if m.kind in ("margin_line", "margin_note"):
-                    x0 = min(x0, max(float(np.min(lay.page_l[r0:r1])), m.x0 - 0.2 * p))
-                    x1 = max(x1, min(float(np.max(lay.page_r[r0:r1])), m.x1 + 0.2 * p))
+                    x0 = min(x0, max(0.0, m.x0 - 0.4 * p))
+                    x1 = max(x1, min(float(w), m.x1 + 0.4 * p))
         else:
             x0, x1 = float(geo.block.x0), float(geo.block.x1)
         b.x0, b.x1 = int(round(x0)), int(round(max(x1, x0 + 1)))
