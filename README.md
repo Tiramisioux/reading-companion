@@ -144,8 +144,19 @@ add *Run Shell Script* (shell `/bin/zsh`, pass input **as arguments**) with the 
 "$HOME/path/to/reading-companion/macos/quick-action.zsh" "$@"
 ```
 
-Settings by environment: `RC_HOME`, `RC_PYTHON` (default `.venv/bin/python`), `RC_ARGS`
-(e.g. `--context 2`), `RC_LOG` (default `~/Library/Logs/reading-companion.log`).
+Settings by environment: `RC_HOME`, `RC_PYTHON` (default `.venv-system/bin/python` when it
+exists, else `.venv/bin/python`), `RC_ARGS` (e.g. `--context 2`), `RC_LOG` (default
+`~/Library/Logs/reading-companion.log`).
+
+When the repository (or the photos) are in `~/Documents`, `~/Desktop` or `~/Downloads`, macOS lets
+a Quick Action's script read them with Apple's `/usr/bin/python3` but not with a pyenv or Homebrew
+python (the log shows `PermissionError: Operation not permitted`). Give the Quick Action a venv of
+Apple's python, beside the one you develop with:
+
+```bash
+/usr/bin/python3 -m venv .venv-system
+.venv-system/bin/pip install -r requirements.txt pillow-heif
+```
 
 ## For an Obsidian ingest step
 

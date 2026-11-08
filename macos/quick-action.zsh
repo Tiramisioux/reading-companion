@@ -11,12 +11,16 @@
 #
 # Settings (environment; all optional):
 #   RC_HOME     the reading-companion folder (default: the folder above this script)
-#   RC_PYTHON   python with numpy/opencv/Pillow (default: $RC_HOME/.venv/bin/python)
+#   RC_PYTHON   python with numpy/opencv/Pillow (default: $RC_HOME/.venv-system/bin/python when it exists, else
+#               $RC_HOME/.venv/bin/python; from a Quick Action macOS lets only Apple's python read ~/Documents, see README)
 #   RC_ARGS     extra arguments, e.g. "--context 2 --book-title 'Wayfinding'"
 #   RC_LOG      log file (default ~/Library/Logs/reading-companion.log)
 
 RC_HOME="${RC_HOME:-${0:A:h:h}}"
-RC_PYTHON="${RC_PYTHON:-$RC_HOME/.venv/bin/python}"
+if [[ -z "${RC_PYTHON:-}" ]]; then
+  RC_PYTHON="$RC_HOME/.venv/bin/python"
+  [[ -x "$RC_HOME/.venv-system/bin/python" ]] && RC_PYTHON="$RC_HOME/.venv-system/bin/python"
+fi
 RC_LOG="${RC_LOG:-$HOME/Library/Logs/reading-companion.log}"
 
 notify() {
