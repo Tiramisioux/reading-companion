@@ -9,11 +9,12 @@ All paths are relative to the repository root. Line numbers drift; search for th
 |---|---|---|---|
 | load | `load_rgb` | `imageio.py` | EXIF orientation, HEIC via pillow-heif |
 | geometry | `build_geometry` | `geometry.py` | analysis scale (`ANALYSIS_LONG_SIDE = 2000`), skew (`estimate_skew`, max `MAX_SKEW_DEG = 12`), text block and gutter split (`find_text_block`, `_split_gutter`), line pitch (`estimate_pitch`), curl (`track_lines` + `fit_dewarp`). Produces the flat (straightened) image and the maps `source_to_flat` / `flat_to_source`. |
-| analysis | `analyse` | `marks.py` | white balance (`white_balance`), printed lines (`text_lines`, `validate_lines` by letter texture), layout (`build_layout`: column edges, page edges, gutter), then `detect_marks` |
-| marks | `detect_marks` | `marks.py` | five sections, in order: tinted strokes = highlights; dark underlines; margin lines; side-margin notes; top/bottom-margin notes (`head_foot_notes`, `classify_group` tells handwriting from print) |
+| analysis | `analyse` | `marks.py` | white balance (`white_balance`), printed lines (`text_lines`, thin pen rules taken out first; `validate_lines` by letter texture, under a dark highlighter on the letters darker than it in the brightest channel), layout (`build_layout`: column edges, page edges, gutter), then `detect_marks` |
+| marks | `detect_marks` | `marks.py` | fingers first (`find_skin`: `skin_coloured` and `_off_page`, cut off by the page edge; `an.skin`, `an.skin_boxes`), then five sections, in order: tinted strokes = highlights (outside `an.skin`); dark underlines; margin lines; side-margin notes; top/bottom-margin notes (`head_foot_notes`, `classify_group` tells handwriting from print) |
 | lines | `assign_lines` | `bands.py` | which printed lines each mark belongs to; 0 / N+1 = just above / below the text, -1 / N+2 = further away |
-| stripes | `make_bands`, `cut_stripe` | `bands.py` | consecutive marked lines grouped (`GAP_BREAK = 1.7` pitches), context lines added (`CONTEXT_GAP = 4.0`), full-width cut through the straightening map |
+| stripes | `make_bands`, `cut_stripe`, `paint_out` | `bands.py` | consecutive marked lines grouped (`GAP_BREAK = 1.7` pitches), context lines added (`CONTEXT_GAP = 4.0`), full-width cut through the straightening map, fingers painted out with the rows' paper colour |
 | print rows | `print_rows`, `row_image` | `pipeline.py` | which ink groups outside the body are OCR'd (running head, folio, chapter heading) |
+| marked text | `line_row`, `row_image(tight=True, dark=…)`, `dark_highlight`, `marked_words` | `pipeline.py` | the marked body lines, one OCR call per page with the print rows; brightest channel against the local light (a dark highlighter also stretched against the darkest print near it); whole words ≥ 60 % covered |
 | page meta | `read_page` | `metadata.py` | page number from header/footer (`FOLIO_RE`, roman numerals), running head, chapter opening |
 
 ## Pipeline, the folder (`process_folder`)
@@ -58,6 +59,8 @@ Thresholds inside functions are written in units of the line pitch `p` (for exam
 | no page number, or a wrong one | `print_rows` (row filtered out?), `row_image` (crop), `read_page`, `FOLIO_RE` |
 | chapter wrong or missing | `read_page` chapter opening, `infer_chapters`, `detect_book_title` |
 | stripe extends into the desk | `find_page_edges` (README known limit: fixed 25 % fallback) |
+| a finger taken for a highlight, or a highlight lost to a finger | `find_skin`, `skin_coloured` (hue < 75 or > 340, chroma 8–48), `_off_page`; the finger rejections in the highlight loop (see `r.analysis.rejected`) |
+| marked words missing or garbled in `passage` | `dark_highlight` (share > 0.15), `row_image` tight branches, `marked_words` |
 
 ## Debugging one photo
 
