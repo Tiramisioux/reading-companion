@@ -22,10 +22,21 @@ img_2004_note1.jpg                (no page number printed on the photo)
 | `highlight` | highlighter of any colour over the text | colour after a local white balance against the paper |
 | `underline` | a pen stroke under a printed line | long thin horizontal ink with printed text right above it |
 | `margin_line` | a vertical pen line beside lines (often doubled, red or black) | long thin vertical ink outside the text column |
-| `margin_note` | handwriting in the side, top or bottom margin | pen ink on bare paper; in the top/bottom margins it must look handwritten (joined letters, wandering baseline) so printed running heads, page numbers and chapter titles are not taken for notes |
+| `margin_note` | handwriting in the side, top or bottom margin, in a gap between paragraphs, or written sideways up the margin | pen ink on the page's paper, outside the printed rows; it must not be print (letters at print size inside a printed row, letters on a straight baseline, a caption beside a figure) and, in the top/bottom margins and inside the column, must look handwritten (joined letters, wandering baseline) so printed running heads, page numbers and chapter titles are not taken for notes |
 
 Not marks: bleed-through from the other side of the leaf, the facing page, fingers, shadows,
 printed rules, the running head and page number.
+
+### Where handwriting is looked for
+
+A note can be anywhere on the page's **paper**: the bright paper region of the photographed page itself (print,
+highlights and notes are holes in it), without the fingers holding it and without anything across the gutter. The
+paper says where the page ends; the page-edge estimates stop short of it on a curled, tightly cropped page, which is
+where a note in the outer margin is. Outside the printed rows means: in the margins, above and below the text, in the
+gap between two paragraphs, and right against a line's start or end. A line of handwriting just under (or over) the
+text has letter texture too and is first taken for a printed line; the first and last lines, when they stand apart,
+are tested for handwriting and given back to the notes. A phone renders a pen's deepest black as pure 0: such pixels
+are ink of a note, not a hole in the photo. A stripe holding a note reaches past it, to the paper's edge if need be.
 
 ### Print that looks like a mark
 
@@ -270,10 +281,12 @@ positives left per category, and stripes that match no label (suspect). On 0.4.0
 | | true positives found | with a mark | false positives left | unlabelled |
 |---|---|---|---|---|
 | 0.3.0 | 191/191 | 180/180 | 76/79 | 8 |
-| 0.4.0 | 180/191 | 180/180 | 13/79 | 1 |
+| 0.4.0 | 180/191 | 180/180 | 10/79 | 9 |
 
 The 11 true positives 0.4.0 no longer gives carry no reader's mark: the rim of a thumb (3), printed line starts and
-note numbers (5), printed figures (3).
+note numbers (5), printed figures (3). The labels only know the stripes 0.3.0 made: 8 of the 9 unlabelled stripes are
+handwriting 0.3.0 missed (a look through all 142 photos found the reader's pen notes or lines missed on 19 of them;
+0.4.0 finds them on all 19, two of them in part), the ninth is on the book's cover.
 
 ## Known limits
 
@@ -282,9 +295,11 @@ note numbers (5), printed figures (3).
 - Handwriting in the top/bottom margins is told from print by shape; a very short note there
   (one or two letters) can be missed. Notes in the side margins are found whatever their size.
 - Pencil (light grey) notes are fainter than the ink threshold and may be missed.
-- Some pen notes are missed: a note written sideways along the margin, a note between two paragraphs, a short
-  note far from the text, a dark red margin line taken for the page's edge. A margin line written right along the
-  page's edge is turned down as the edge. A note written on a printed figure is turned down with the figure.
+- A note written against a finger holding the page, or right at the paper's edge, is turned down with the finger or
+  the edge; so is a margin line drawn right along the page's edge. A note written on or beside a printed figure
+  (within 2.5 pitches) is turned down as its caption or label.
+- A note's part written very close to a printed row, at print size and in separate letters, can be taken for print;
+  the rest of the note still gives the stripe. A bracket drawn in the margin as a thin line with a tick is not found.
 - Large print (a chapter title, a heading in the back matter) in the top margin can still be taken for a note.
 - One page per photo: on a two-page spread only the larger/denser page is processed.
 - Apple Vision OCR is built and run on macOS only; the tests use Tesseract or none.
