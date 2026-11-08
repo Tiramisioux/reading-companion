@@ -1,0 +1,7 @@
+# outputs of a run and local test material (book pages are copyrighted: never commit them)
+reading-companion/
+local/
+*.local.json
+__pycache__/
+*.pyc
+.venv/

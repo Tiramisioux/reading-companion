@@ -1,0 +1,26 @@
+# Runs in the standalone reading-companion repository (this folder is its root there).
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  unittest:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.9", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install
+        run: |
+          sudo apt-get update -q && sudo apt-get install -y -q tesseract-ocr
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Unit and synthetic end-to-end tests
+        run: python -m unittest discover -s tests -t . -v
