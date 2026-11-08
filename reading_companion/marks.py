@@ -28,6 +28,14 @@ HL_CHROMA = 10.0          # a pixel is tinted above this
 HL_COMPONENT_CHROMA = 15.0  # a stroke's median tint must reach this
 INK_L = 58.0              # white-balanced L* below this is ink (paper is ~100)
 
+# printed things that are not the reader's (in units of the line pitch p where not said otherwise)
+FIGURE_L = 82.0           # white-balanced L* below this (and near neutral) is figure ink or a halftone's grey
+FIGURE_MIN = 3.0          # a printed figure spans at least this many pitches across and down
+FIGURE_GAP_INK = 0.45     # text: the gaps between its lines (pen underlines taken out) hold less ink than this share of the lines' own
+RULE_SPAN = 0.85          # a printed rule spans this share of the column or more...
+RULE_THICK = 0.16         # ...and stays within this many pitches top to bottom (a pen underline that long wobbles more)
+PRINT_LETTER_MAX = 1.65   # print beside the column: no letter taller than this many body letter heights
+
 COLOR_BUCKETS = [  # (name, hue_from, hue_to) in degrees of atan2(b*, a*) after white balance
     ("pink", 330.0, 20.0),
     ("red", 20.0, 45.0),
@@ -847,6 +855,8 @@ def head_foot_notes(an: "PageAnalysis", geo: Geometry, lay: Layout, zone: Tuple[
                 g.handwriting, g.why = False, g.why + " | not on paper"
             elif (g.x1 - g.x0) < 0.8 * p or sum(c[4] for c in g.comps if len(c) < 7 or c[6]) < 0.1 * p * 1.2 * p:
                 g.handwriting, g.why = False, g.why + " | too small"
+            elif printed_beside(an, sub[g.y0:g.y1, g.x0:g.x1], g.x0, g.y0, p):
+                g.handwriting, g.why = False, g.why + " | print on a printed row"
     an.margin_groups.extend(out)
     notes = [g for g in out if g.handwriting]
     # a note absorbs the loose bits around it (loops, dots, strokes that fell into tiny groups);
@@ -1018,9 +1028,6 @@ def find_skin(an: "PageAnalysis", p: float) -> None:
         an.skin = cv2.dilate(((grown & (warm > 0)) | an.skin).astype(np.uint8), np.ones((3, 3), np.uint8)) > 0
 
 
-FIGURE_L = 82.0           # white-balanced L* below this (and near neutral) is figure ink or a halftone's grey
-FIGURE_MIN = 3.0          # a printed figure spans at least this many pitches across and down
-FIGURE_GAP_INK = 0.45     # text: the gaps between its lines (pen underlines taken out) hold less ink than this share of the lines' own
 
 
 def find_figures(an: "PageAnalysis", p: float) -> List[Tuple[int, int, int, int]]:
@@ -1032,9 +1039,10 @@ def find_figures(an: "PageAnalysis", p: float) -> List[Tuple[int, int, int, int]
     h, w = an.Lw.shape
     if lay is None:
         return []
-    area = _row_mask(h, w, lay.page_l, lay.page_r) & an.valid
-    area[:lay.page_top] = False
-    area[lay.page_bottom + 1:] = False
+    # a book's figures stand in its text column: the margins (fingers, the page's edge, the ground beyond) are left out.
+    # Not cut at page_top / page_bottom: a figure above or below the text is what puts those estimates inside the figure
+    col_l, col_r = float(np.median(lay.text_l)), float(np.median(lay.text_r))
+    area = _row_mask(h, w, np.maximum(lay.page_l, col_l - 0.5 * p), np.minimum(lay.page_r, col_r + 0.5 * p)) & an.valid
     C = np.hypot(an.aw, an.bw)
     dark = (an.Lw < FIGURE_L) & (C < 12.0) & area
     if an.skin is not None:
@@ -1042,10 +1050,10 @@ def find_figures(an: "PageAnalysis", p: float) -> List[Tuple[int, int, int, int]
     k = odd(max(3, 0.25 * p))
     m = cv2.morphologyEx(dark.astype(np.uint8), cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k)))
     n, lab, st, _ = cv2.connectedComponentsWithStats(m, connectivity=8)
-    border = ~cv2.erode(an.valid.astype(np.uint8), np.ones((5, 5), np.uint8)).astype(bool)
+    # the photo's border: the frame of valid pixels with its holes filled (a photograph's deepest black is 0 too)
+    border = ~cv2.erode(fill_holes(an.valid).astype(np.uint8), np.ones((5, 5), np.uint8)).astype(bool)
     border[:2] = border[-2:] = True
     border[:, :2] = border[:, -2:] = True
-    col_l, col_r = float(np.median(lay.text_l)), float(np.median(lay.text_r))
     boxes: List[List[int]] = []
     for i in range(1, n):
         x, y, ww, hh, _a = st[i]
@@ -1111,7 +1119,6 @@ def _text_like(comp: np.ndarray, dark: np.ndarray, lines: List[TextLine], y0: in
     return g is not None and g < FIGURE_GAP_INK
 
 
-PRINT_LETTER_MAX = 1.65   # print beside the column: no letter taller than this many body letter heights
 
 
 def printed_beside(an: "PageAnalysis", mask: np.ndarray, x0: int, y0: int, p: float) -> bool:
@@ -1234,6 +1241,12 @@ def detect_marks(an: "PageAnalysis", geo: Geometry, segs: List[Segment]) -> None
         if density < 0.04 or inside < 0.6:
             rejected.append(m)
             continue
+        col_w = float(lay.text_r[min(h - 1, y)] - lay.text_l[min(h - 1, y)])
+        if ww >= RULE_SPAN * col_w and hh <= RULE_THICK * p and C_ < 12.0:
+            # ruler-straight across the whole column: a table's or a footnote's printed rule (a pen wobbles over that length)
+            m.why = "a printed rule"
+            rejected.append(m)
+            continue
         marks.append(m)
 
     # ---- margin lines -------------------------------------------------------------------------
@@ -1253,11 +1266,12 @@ def detect_marks(an: "PageAnalysis", geo: Geometry, segs: List[Segment]) -> None
         if not pen_like(sg.lightness, sg.chroma) or (sg.y1 - sg.y0 > 0.5 * block_h and sg.chroma < 25.0):
             rejected.append(m)
             continue
-        if sg.x1 - sg.x0 < 0.15 * p:
-            m.why = "a hairline (a page's edge)"
+        to_edge = min(sg.x0 - lay.page_l[yc], lay.page_r[yc] - sg.x1)
+        if sg.x1 - sg.x0 < 0.15 * p and to_edge < 1.0 * p:
+            m.why = "a hairline by the page's edge (the edge of this page or the next)"
             rejected.append(m)
             continue
-        if sg.x0 - lay.page_l[yc] < 0.15 * p or lay.page_r[yc] - sg.x1 < 0.15 * p:
+        if to_edge < 0.15 * p:
             # a pen line is drawn on the paper; one that runs along the page's edge is the edge itself, the facing page's,
             # or the rim of the finger holding the page there
             m.why = "on the page edge (an edge or a finger's rim)"

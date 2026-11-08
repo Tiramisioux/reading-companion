@@ -10,7 +10,7 @@ All paths are relative to the repository root. Line numbers drift; search for th
 | load | `load_rgb` | `imageio.py` | EXIF orientation, HEIC via pillow-heif |
 | geometry | `build_geometry` | `geometry.py` | analysis scale (`ANALYSIS_LONG_SIDE = 2000`), skew (`estimate_skew`, max `MAX_SKEW_DEG = 12`), text block and gutter split (`find_text_block`, `_split_gutter`), line pitch (`estimate_pitch`), curl (`track_lines` + `fit_dewarp`). Produces the flat (straightened) image and the maps `source_to_flat` / `flat_to_source`. |
 | analysis | `analyse` | `marks.py` | white balance (`white_balance`), printed lines (`text_lines`, thin pen rules taken out first; `validate_lines` by letter texture, under a dark highlighter on the letters darker than it in the brightest channel), layout (`build_layout`: column edges, page edges, gutter), then `detect_marks` |
-| marks | `detect_marks` | `marks.py` | fingers first (`find_skin`: `skin_coloured` and `_off_page`, cut off by the page edge; `an.skin`, `an.skin_boxes`), then five sections, in order: tinted strokes = highlights (outside `an.skin`); dark underlines; margin lines; side-margin notes; top/bottom-margin notes (`head_foot_notes`, `classify_group` tells handwriting from print) |
+| marks | `detect_marks` | `marks.py` | fingers first (`find_skin`: `skin_coloured` and `_off_page`, cut off by the page edge; `an.skin`, `an.skin_boxes`) and printed figures (`find_figures` → `an.figures`: neutral grey ink connected over ≥ `FIGURE_MIN` pitches in the column, whose row gaps hold ink, `gap_ink` ≥ `FIGURE_GAP_INK`), then five sections, in order: tinted strokes = highlights (outside `an.skin`); dark underlines (a printed rule, `RULE_SPAN`/`RULE_THICK`, turned down); margin lines (on the page edge or a hairline by it turned down); side-margin notes (`printed_beside`: print on a printed row of `an.print_lines`, turned down); top/bottom-margin notes (`head_foot_notes`, `classify_group` tells handwriting from print, then `printed_beside`); last, any mark `in_figure` is turned down unless it is a vivid highlighter/underline |
 | lines | `assign_lines` | `bands.py` | which printed lines each mark belongs to; 0 / N+1 = just above / below the text, -1 / N+2 = further away |
 | stripes | `make_bands`, `cut_stripe`, `paint_out` | `bands.py` | consecutive marked lines grouped (`GAP_BREAK = 1.7` pitches), context lines added (`CONTEXT_GAP = 4.0`), full-width cut through the straightening map, fingers painted out with the rows' paper colour |
 | print rows | `print_rows`, `row_image` | `pipeline.py` | which ink groups outside the body are OCR'd (running head, folio, chapter heading) |
@@ -37,6 +37,11 @@ A rerun deletes only what the previous manifest listed (`_clean_previous`).
 | `COLOR_BUCKETS` | `marks.py` | hue ranges behind the colour names; edit to rename/re-split colours |
 | `GAP_BREAK = 1.7` | `bands.py` | marked lines further apart still join one stripe |
 | `CONTEXT_GAP = 4.0` | `bands.py` | context lines across a bigger gap (figure, section break) are kept |
+| `FIGURE_L = 82.0` | `marks.py` | lighter grey counts as figure ink (pale maps found, but shadows too) |
+| `FIGURE_MIN = 3.0` | `marks.py` | a figure must be bigger (pitches across and down) |
+| `FIGURE_GAP_INK = 0.45` | `marks.py` | more ink needed between rows before a block is a figure, not text (text measures 0.02–0.19, figures 0.65–1.1 on the labelled book) |
+| `RULE_SPAN = 0.85`, `RULE_THICK = 0.16` | `marks.py` | shorter / less straight underlines count as printed rules (pen underlines across a whole line measure ≥ 0.21 thick) |
+| `PRINT_LETTER_MAX = 1.65` | `marks.py` | larger letters beside the column still count as print (handwriting lost) |
 | `NEAR_EDGE = 12.0` | `bands.py` | top/bottom notes further from the text still get a stripe |
 | `JOIN_GAP = 2.5` | `bands.py` | top/bottom notes further from the text still join line 1 / line N |
 
@@ -53,7 +58,12 @@ Thresholds inside functions are written in units of the line pitch `p` (for exam
 | margin line missed or too long | `vertical_segments`, `chain_segments`, margin-lines section |
 | side note missed | side-margin notes section, `note_ink`, `stroke_like`, `INK_L` |
 | side note takes one line too many | note branch of `assign_lines` (`m.y0 - 0.25 * p <= ln.center <= m.y1 + 0.25 * p`) |
-| running head or page number taken for a note | `head_foot_notes`, `classify_group`, `_merge_print_groups` |
+| running head or page number taken for a note | `head_foot_notes`, `classify_group`, `_merge_print_groups`, `printed_beside` |
+| a line's start/end, or a note number, taken for a side note | `printed_beside` (letters inside one row of `an.print_lines`), `build_layout` step 3 (`text_l`/`text_r`, clamped to 0.6 p beyond the column) |
+| a map, plan, diagram or photo gives stripes | `find_figures` (is it in `an.figures`? `gap_ink` too low, cut by `border`, outside the column?), `in_figure` |
+| a table rule taken for an underline | dark-underlines section, `RULE_SPAN`, `RULE_THICK` |
+| a finger's rim or the page edge taken for a margin line | margin-lines section (`to_edge`), `find_page_edges` |
+| a real mark lost on a figure page | `in_figure` (1 p reach around the figure), the vivid-colour exemption at the end of `detect_marks` |
 | two passages merged or one split | `consecutive` inside `make_bands`, `GAP_BREAK`, `validate_lines` (a lost line shifts every index) |
 | stripe cut crooked or through a line | `estimate_skew`, `track_lines`, `fit_dewarp` (check `skew_deg`, `dewarp_px` in the manifest) |
 | line numbers off by some amount | `text_lines` / `validate_lines` (a missing or extra printed line) |
@@ -77,7 +87,8 @@ for ln in r.analysis.lines[:5]: print(ln.index, round(ln.top), round(ln.bottom))
 print([(b.first_line, b.last_line, b.ctx_first, b.ctx_last, b.kinds) for b in r.bands])
 ```
 
-`r.analysis.rejected` holds candidate marks that were turned down, which is usually the
+`r.analysis.rejected` holds candidate marks that were turned down (with `m.why`: "a printed rule", "on a printed
+figure", "print on a printed row", "on the page edge …"), which is usually the
 fastest way to see why something real was missed. `r.review` is the review sheet (BGR).
 Coordinates of marks and lines are in the flat analysis image; map back with
 `r.geo.flat_to_source(xs, ys)`.

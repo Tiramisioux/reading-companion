@@ -96,6 +96,19 @@ repository's own scorer, ideally with both contexts:
 Report results as counts (found / expected, extra stripes, context errors), and quote the
 failing lines verbatim.
 
+On hand-labelled stripes (true/false positives, as in the private
+`Tiramisioux/reading-companion-fixtures`, `wayfinding/`), use the label scorer. Run it before and after a
+detection change and report recall (also "with a mark") and false positives left per category; never accept a
+lost true positive that carries a reader's mark:
+
+```bash
+.venv/bin/python tools/score_labels.py ../reading-companion-fixtures/wayfinding --jobs 3 --list
+```
+
+The categories and the audited label noise are in `tests/fixtures/wayfinding_fp_categories.json` (ids only).
+Look at a lost stripe on its photo before calling it noise, and keep everything derived from the photos (review
+sheets, crops, notes quoting the book) outside this repository.
+
 ## Improve
 
 Work test-first and keep every change deterministic.

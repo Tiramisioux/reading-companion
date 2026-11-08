@@ -13,9 +13,11 @@ first. A labelled stripe no produced stripe matches, but which one produced stri
 
 Reported:
 
-- **recall**: labelled true positives still found, of all of them;
+- **recall**: labelled true positives still found, of all of them; and again leaving out the labels
+  audited as carrying no mark of the reader (``tp_without_mark`` in the categories file: label noise);
 - **false positives left**: labelled false positives still produced (per category when
-  ``FIXTURE_DIR/fp_categories.json`` or ``--categories`` gives one per stripe id);
+  ``--categories``, ``FIXTURE_DIR/fp_categories.json`` or ``tests/fixtures/wayfinding_fp_categories.json``
+  gives one per stripe id);
 - **unlabelled**: stripes that match no label at all. They come from photos where the labelled
   run produced something else: count them as suspect (most likely false positives) and look.
 
@@ -127,7 +129,8 @@ def match_photo(labels: List[Dict], produced: List[Dict], iou_min: float, hold_m
 # the report
 # ---------------------------------------------------------------------------
 
-def score(data: Dict, results: Dict[str, Dict], categories: Dict[str, str], iou_min: float, hold_min: float) -> Dict:
+def score(data: Dict, results: Dict[str, Dict], categories: Dict[str, str], iou_min: float, hold_min: float,
+          no_mark: Optional[Dict[str, str]] = None) -> Dict:
     """``data``: the labels (labels.json); ``results``: photo name -> ``run_photo`` output."""
     by_source: Dict[str, List[Dict]] = defaultdict(list)
     for s in data["stripes"]:
@@ -165,11 +168,19 @@ def score(data: Dict, results: Dict[str, Dict], categories: Dict[str, str], iou_
             pr = produced[j]
             unlabelled.append({"source": src, "note": pr["note"], "kinds": pr["kinds"], "colors": pr["colors"],
                                "marks": pr["marks"], "lines_marked": pr["lines_marked"]})
+    no_mark = no_mark or {}
+    audited = [r for r in found + lost if r["id"] not in no_mark]
+    for r in lost:
+        if r["id"] in no_mark:
+            r["no_mark"] = no_mark[r["id"]]
     cats = Counter(categories.get(s["id"], "uncategorised") for s in data["stripes"] if s["label"] == "false_positive")
     left = Counter(r["category"] for r in fp_left)
     return {
         "true_positives": tp_total, "found": len(found), "recall": round(len(found) / max(1, tp_total), 4),
         "found_merged": sum(1 for r in found if r["how"] == "merged"),
+        "true_positives_with_mark": len(audited),
+        "found_with_mark": sum(1 for r in found if r["id"] not in no_mark),
+        "recall_with_mark": round(sum(1 for r in found if r["id"] not in no_mark) / max(1, len(audited)), 4),
         "false_positives": fp_total, "false_positives_left": len(fp_left),
         "unlabelled": len(unlabelled),
         "per_category": {c: {"labelled": n, "left": left.get(c, 0)} for c, n in sorted(cats.items())},
@@ -180,6 +191,9 @@ def score(data: Dict, results: Dict[str, Dict], categories: Dict[str, str], iou_
 def print_report(rep: Dict, show: bool) -> None:
     print(f"true positives found : {rep['found']}/{rep['true_positives']}  recall {100 * rep['recall']:.1f} %"
           f"  ({rep['found_merged']} only as part of a larger stripe)")
+    if rep["true_positives_with_mark"] != rep["true_positives"]:
+        print(f"  of those with a mark : {rep['found_with_mark']}/{rep['true_positives_with_mark']}"
+              f"  recall {100 * rep['recall_with_mark']:.1f} %  (labels audited as carrying no mark left out)")
     print(f"false positives left : {rep['false_positives_left']}/{rep['false_positives']}")
     print(f"unlabelled (suspect) : {rep['unlabelled']}")
     if rep["errors"]:
@@ -221,8 +235,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if not cat_path.exists():
         alt = Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "wayfinding_fp_categories.json"
         cat_path = alt if (args.categories is None and alt.exists()) else cat_path
-    categories = json.loads(cat_path.read_text(encoding="utf-8")) if cat_path.exists() else {}
-    categories = categories.get("categories", categories)
+    cat_data = json.loads(cat_path.read_text(encoding="utf-8")) if cat_path.exists() else {}
+    categories = cat_data.get("categories", cat_data)
+    no_mark = cat_data.get("tp_without_mark", {})
 
     results: Dict[str, Dict] = {}
     if args.cache and args.cache.exists():
@@ -244,7 +259,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if args.cache:
             args.cache.write_text(json.dumps([results[s] for s in sorted(results)], indent=0), encoding="utf-8")
 
-    rep = score(data, {s: results[s] for s in sources if s in results}, categories, args.iou, args.hold)
+    rep = score(data, {s: results[s] for s in sources if s in results}, categories, args.iou, args.hold, no_mark)
     print_report(rep, args.list)
     if args.report:
         args.report.write_text(json.dumps(rep, ensure_ascii=False, indent=1), encoding="utf-8")
