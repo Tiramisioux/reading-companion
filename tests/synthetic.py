@@ -33,6 +33,7 @@ def make_page(n_lines: int = 24, highlight: Optional[Dict[int, str]] = None, und
     top = 260
     font, scale, thick = cv2.FONT_HERSHEY_COMPLEX, 0.95, 2
     lines = []
+    words = []          # (line, word, x0, x1) of every printed word
     for i in range(n_lines):
         y = top + i * pitch
         x = x0
@@ -44,6 +45,7 @@ def make_page(n_lines: int = 24, highlight: Optional[Dict[int, str]] = None, und
             if x + tw > limit:
                 break
             cv2.putText(ink, w, (x, y), font, scale, 255, thick, cv2.LINE_AA)
+            words.append((i + 1, w, x, x + tw))
             x += tw + 16
         lines.append((y - 9, x0, x))
     # running head
@@ -52,6 +54,8 @@ def make_page(n_lines: int = 24, highlight: Optional[Dict[int, str]] = None, und
     hl = np.ones((height, width, 3), np.float32)
     for ln, colour in (highlight or {}).items():
         yc, a, b = lines[ln - 1]
+        if isinstance(colour, tuple):          # (colour, x0, x1): a highlight over part of the line, in page pixels
+            colour, a, b = colour[0], colour[1] + 6, colour[2] - 6
         c = np.array(HIGHLIGHTS[colour], np.float32) / 255.0
         hl[yc - 20:yc + 16, a - 6:b + 6] = c
     img = img * hl
@@ -83,4 +87,4 @@ def make_page(n_lines: int = 24, highlight: Optional[Dict[int, str]] = None, und
     if angle:
         M = cv2.getRotationMatrix2D((width / 2, height / 2), angle, 1.0)
         img = cv2.warpAffine(img, M, (width, height), borderMode=cv2.BORDER_CONSTANT, borderValue=(60, 60, 70))
-    return img, {"lines": lines, "pitch": pitch}
+    return img, {"lines": lines, "pitch": pitch, "words": words}

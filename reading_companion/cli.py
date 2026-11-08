@@ -40,6 +40,7 @@ def build_parser() -> argparse.ArgumentParser:
     ex.add_argument("--name-template", default=DEFAULT_TEMPLATE, help=f"stripe file names (default {DEFAULT_TEMPLATE!r})")
     ex.add_argument("--quality", type=int, default=90, help="JPEG quality (default 90)")
     ex.add_argument("--no-review", action="store_true", help="skip the review sheets and index.html")
+    ex.add_argument("--no-text", action="store_true", help="do not read the text of the marked words (OCR)")
     ex.add_argument("--quiet", action="store_true", help="no progress lines on stderr")
     return ap
 
@@ -59,7 +60,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             folder = files[0].parent if files else inputs[0]
         opts = Options(context=max(0, args.context), ocr=args.ocr, ocr_bin=args.ocr_bin, languages=args.languages,
                        book_title=args.book_title, name_template=args.name_template,
-                       quality=int(min(100, max(30, args.quality))), review=not args.no_review)
+                       quality=int(min(100, max(30, args.quality))), review=not args.no_review,
+                       text=not args.no_text)
 
         def progress(frac: float, name: str) -> None:
             if not args.quiet:

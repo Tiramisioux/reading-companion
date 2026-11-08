@@ -4,8 +4,8 @@ Cut the passages you marked in photographed book pages into **stripes**: horizon
 the full width of the page, one per marked passage, saved as JPEGs in file order with the
 **chapter and page number** in the file name and inside the JPEG.
 
-Deterministic image processing (OpenCV); no language model. OCR is used only to read the
-printed page number, running head and chapter heading.
+Deterministic image processing (OpenCV); no language model. OCR reads the printed page number,
+running head and chapter heading, and the **words you marked** (see *Text of the marked words*).
 
 ```
 img_2001_chapter_10_p_202_note1.jpg
@@ -42,6 +42,22 @@ printed rules, the running head and page number.
 - A note in the top margin is shown with the first printed line(s) below it (on a chapter opening
   that includes the chapter title); a note in the bottom margin with the last line(s) above it.
   A note close to the text (within about 2.5 lines) joins a marked first/last line into one stripe.
+
+## Text of the marked words
+
+With an OCR engine (and without `--no-text`) every stripe also carries the printed text you marked, in the
+manifest (`text`, `passage`) and inside the JPEG (`passage` in the EXIF `UserComment` record and as XMP `rc:passage`):
+
+- only the printed lines that carry a **highlight**, an **underline** or a **margin line** are read; the context
+  lines around them and the lines beside a margin note alone are not;
+- on a **highlighted** line only the **whole words** the highlighter covers count: a word is kept when at least 60 %
+  of its width is tinted, so a highlight that spills onto a letter or two of the next word does not take that word
+  along; on an **underlined** line the words above the pen stroke (60 % of their width), beside a **margin line** the
+  whole line;
+- `text` is the list `[{"line": 5, "text": "…"}]` (printed line numbers of the page), `passage` the lines joined
+  (a word broken with a hyphen at a line end is mended; a gap between marked lines is ` … `). `null` when no OCR ran.
+
+Apple Vision gives a box per word; with Tesseract the words come with their own boxes as well.
 
 ## Page number and chapter (if present)
 
@@ -95,14 +111,14 @@ Running again replaces the files the previous run listed in its manifest (only t
 Options: `--out DIR`, `--context N`, `--ocr auto|vision|tesseract|none`, `--languages`,
 `--book-title "Wayfinding"`, `--name-template "{stem}{chapter_part}{page_part}_note{note}"`
 (fields: stem, chapter, chapter_part, page, page_part, note, notes, seq, book),
-`--quality 90`, `--no-review`, `--quiet`.
+`--quality 90`, `--no-review`, `--no-text` (do not read the marked words), `--quiet`.
 
 ### Metadata inside each JPEG
 
 - EXIF `ImageDescription`: `Wayfinding - chapter 10 (Am I Here?) - p. 202 - note 2/3 - yellow highlight, black underline - from IMG_2001.jpg`
 - EXIF `UserComment`: the stripe's JSON record (as in the manifest);
   `reading_companion.imageio.read_stripe_meta(path)` reads it back
-- XMP: `dc:title`, `dc:description`, `dc:source` and `rc:*` fields
+- XMP: `dc:title`, `dc:description`, `dc:source` and `rc:*` fields (`rc:passage`: the marked words)
 
 ## Right-click a folder in Finder (macOS)
 
@@ -125,7 +141,8 @@ What a later ingest can rely on (this tool writes nothing into a vault):
 - `manifest.json` → `stripes[]`, in reading order (`seq`): `file`, `source` (the photo),
   `note` / `notes_on_page`, `page_number` (+ `page_number_source`), `chapter`
   (`number`, `title`, `source`), `running_head`, `book`, `lines_marked`, `lines_shown`,
-  `kinds`, `colors`, `marks[]`, `size`, `source_polygon` (where the stripe sits on the photo).
+  `kinds`, `colors`, `marks[]`, `size`, `text` / `passage` (the marked words, see above),
+  `source_polygon` (where the stripe sits on the photo).
 - `manifest.json` → `pages[]`: per photo what was read (page number, running head, chapter,
   OCR rows), its stripes, skew and line pitch, and `error` when a photo could not be read.
 - Each stripe JPEG carries the same record (EXIF `UserComment`, read it with

@@ -84,6 +84,15 @@ class VisionEngine(OcrEngine):
                 for ln in d.get("lines", []):
                     x0, y0 = ln["x"] * w, ln["y"] * h
                     x1, y1 = x0 + ln["w"] * w, y0 + ln["h"] * h
+                    conf = float(ln.get("conf", 0.0))
+                    boxes = ln.get("words") or []
+                    if boxes and len(boxes) == len(ln["text"].split()):
+                        # Vision's own box per word; the vertical extent stays the line's, so the words of one line
+                        # still share one (y0, y1) and are grouped as a line downstream
+                        for b in boxes:
+                            a = b["x"] * w
+                            words.append((b["text"], conf, int(a), int(y0), int(a + b["w"] * w), int(y1)))
+                        continue
                     toks = ln["text"].split()
                     total = sum(len(t) for t in toks) + max(0, len(toks) - 1)
                     pos = 0
