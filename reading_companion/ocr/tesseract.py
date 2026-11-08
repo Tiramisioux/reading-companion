@@ -24,33 +24,37 @@ class TesseractEngine(OcrEngine):
         have = [l for l in wanted if l in langs] or (["eng"] if "eng" in langs else langs[1:2])
         self.lang = "+".join(have) if have else "eng"
 
-    def read(self, images: Sequence[np.ndarray]) -> List[List[Word]]:
+    def read(self, images: Sequence[np.ndarray], mode: str = "line") -> List[List[Word]]:
         out: List[List[Word]] = []
+        psms = ("7", "8") if mode == "line" else ("6",)
         with tempfile.TemporaryDirectory(prefix="rc-ocr-") as tmp:
             for i, img in enumerate(images):
                 g = img if img.ndim == 2 else cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
-                pad = max(10, g.shape[0] // 4)
+                pad = max(10, min(g.shape[0], 200) // 4)
                 _, bw = cv2.threshold(g, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
                 best: List[Word] = []
                 best_score = -1.0
-                # grey and binarised crops, line then word mode: keep the most confident reading
+                # grey and binarised crops: keep the more confident reading
                 for v, variant in enumerate((g, bw)):
-                    path = os.path.join(tmp, f"row{i}_{v}.png")
+                    path = os.path.join(tmp, f"img{i}_{v}.png")
                     cv2.imwrite(path, cv2.copyMakeBorder(variant, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=255))
-                    for psm in ("7", "8"):
-                        words = self._run(path, psm)
+                    for psm in psms:
+                        words = [(t, c, x0 - pad, y0 - pad, x1 - pad, y1 - pad) for t, c, x0, y0, x1, y1 in self._run(path, psm)]
                         if words:
                             score = float(np.mean([w[1] for w in words])) * min(1.0, sum(len(w[0]) for w in words) / 3.0)
                             if score > best_score:
                                 best, best_score = words, score
                             break
+                    if mode == "block" and best_score >= 0.85:
+                        break   # clean print: the grey reading is good enough
                 out.append(best)
         return out
 
     def _run(self, path: str, psm: str) -> List[Word]:
+        env = dict(os.environ, OMP_THREAD_LIMIT="1")   # tesseract's OpenMP threads only slow small images down
         try:
             res = subprocess.run(["tesseract", path, "-", "--psm", psm, "-l", self.lang, "tsv"],
-                                 capture_output=True, text=True, timeout=60)
+                                 capture_output=True, text=True, timeout=120, env=env)
         except subprocess.TimeoutExpired:
             return []
         return _parse_tsv(res.stdout)

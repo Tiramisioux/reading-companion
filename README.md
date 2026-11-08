@@ -35,7 +35,8 @@ printed rules, the running head and page number.
 - A completely **unmarked line between marks separates** them.
 - Every stripe shows the **line before and the line after** the marked lines (`--context 1`,
   the default; `--context 0` cuts just the marked lines). Two passages one line apart therefore
-  share that line, and stay two notes.
+  share that line, and stay two notes. Context stops at a section break: the first line of the
+  next section is not shown.
 - A stripe is a plain horizontal cut across the **full width of the page**, margin to margin, so
   a note in the margin is seen next to the lines it was written beside. The page is straightened
   first (skew and the curl towards the gutter), so the cut follows the printed lines.
@@ -90,19 +91,38 @@ Output goes to `<folder>/reading-companion/`:
 | `index.html` + `review/` | each photo with its stripes outlined, next to the stripes, for checking by eye |
 
 stdout is one JSON line (`{"ok": true, "stripes": 16, ...}`); progress lines go to stderr.
-Running again replaces the files the previous run listed in its manifest (only those).
+Several folders (or photos from several folders) can be given at once; each folder is its own
+run. Running again replaces the files the previous run listed in its manifest (only those, and
+only inside the output folder); a run on some photos of a folder keeps the other photos'
+stripes. `--out` may not be the photo folder itself or a folder above it.
 
 Options: `--out DIR`, `--context N`, `--ocr auto|vision|tesseract|none`, `--languages`,
 `--book-title "Wayfinding"`, `--name-template "{stem}{chapter_part}{page_part}_note{note}"`
 (fields: stem, chapter, chapter_part, page, page_part, note, notes, seq, book),
 `--quality 90`, `--no-review`, `--quiet`.
 
-### Metadata inside each JPEG
+### The caption: the marked text, read by OCR
 
-- EXIF `ImageDescription`: `Wayfinding - chapter 10 (Am I Here?) - p. 202 - note 2/3 - yellow highlight, black underline - from IMG_2001.jpg`
-- EXIF `UserComment`: the stripe's JSON record (as in the manifest);
-  `reading_companion.imageio.read_stripe_meta(path)` reads it back
-- XMP: `dc:title`, `dc:description`, `dc:source` and `rc:*` fields
+Each stripe is read by OCR (after the highlighter colour is washed out, so the words under it
+read as plain print) and the words you marked become the JPEG's **caption**: the highlighted
+words exactly (a highlight that starts mid-line starts the caption there), the words above an
+underline, the whole lines beside a margin line or a side note. A gap of unmarked words between
+marked ones shows as "…"; a word broken at a line end is mended. A handwritten note read with
+enough confidence is added as `Note: …` (Apple Vision reads handwriting; Tesseract mostly
+cannot, so its guesses are left out).
+
+| Where | What |
+|---|---|
+| IPTC `Caption-Abstract`, XMP `dc:description`, EXIF `ImageDescription` (UTF-8) | the caption (the summary below when OCR is off) |
+| IPTC `Headline`, XMP `dc:title` / `photoshop:Headline` | `Wayfinding - chapter 10 (Am I Here?) - p. 202 - note 2/3 - yellow highlight, black underline - from IMG_2001.jpg` |
+| IPTC `Keywords`, XMP `dc:subject` | book, `chapter 10`, `p. 202` |
+| EXIF `UserComment` | the stripe's JSON record (as in the manifest); `reading_companion.imageio.read_stripe_meta(path)` reads it back |
+| XMP `rc:*` | the record's simple fields (page, chapter number/title, note, lines, kinds, colours) |
+
+The manifest also holds `caption`, `quote` (the marked words), `text` (every line shown,
+context included), `lines_text` (per line, with its marked words), `note_text` and
+`ocr_confidence`. OCR quality depends on the engine: Tesseract misreads some words under dark
+highlighter; Apple Vision does much better.
 
 ## Right-click a folder in Finder (macOS)
 
@@ -122,7 +142,8 @@ Settings by environment: `RC_HOME`, `RC_PYTHON` (default `.venv/bin/python`), `R
 
 What a later ingest can rely on (this tool writes nothing into a vault):
 
-- `manifest.json` → `stripes[]`, in reading order (`seq`): `file`, `source` (the photo),
+- `manifest.json` → `stripes[]`, in reading order (`seq`): `file`, `caption` / `quote` /
+  `text` (the OCR'd words: what was marked, and everything shown), `source` (the photo),
   `note` / `notes_on_page`, `page_number` (+ `page_number_source`), `chapter`
   (`number`, `title`, `source`), `running_head`, `book`, `lines_marked`, `lines_shown`,
   `kinds`, `colors`, `marks[]`, `size`, `source_polygon` (where the stripe sits on the photo).

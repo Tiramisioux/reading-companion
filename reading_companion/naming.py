@@ -52,6 +52,18 @@ def chapter_label(number: Optional[str], title: Optional[str]) -> str:
     return slug(title, 32)
 
 
+TEMPLATE_FIELDS = ("stem", "chapter", "chapter_part", "page", "page_part", "note", "notes", "seq", "book")
+
+
+def check_template(template: str) -> str:
+    """'' when the template formats, else what is wrong (unknown field, stray brace)."""
+    try:
+        template.format(**{k: "x" for k in TEMPLATE_FIELDS})
+    except (KeyError, IndexError, ValueError) as exc:
+        return f"name template {template!r}: {type(exc).__name__} {exc} (fields: {', '.join(TEMPLATE_FIELDS)})"
+    return ""
+
+
 def stripe_name(template: str, stem: str, chapter: str, page: str, note: int, notes: int, seq: int, book: str = "") -> str:
     fields: Dict[str, str] = {
         "stem": slug(stem, 60) or "page",

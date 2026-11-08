@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Cut the passages you marked in photographed book pages into stripes, with page and chapter in the file names."
 readme = "README.md"
 requires-python = ">=3.9"
-dependencies = ["numpy>=1.22", "opencv-python-headless>=4.7", "Pillow>=10.0"]
+dependencies = ["numpy>=1.22", "opencv-python-headless>=4.7", "Pillow>=11.1"]
 
 [project.optional-dependencies]
 heif = ["pillow-heif>=0.13"]

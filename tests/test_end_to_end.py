@@ -20,7 +20,7 @@ class EndToEndTest(unittest.TestCase):
         pages = [
             make_page(highlight={5: "yellow", 6: "teal", 7: "teal"}, underline=(12,), margin_line=(16, 18), seed=1),
             make_page(highlight={3: "pink", 20: "orange"}, note_beside=10, angle=2.5, seed=2),
-            make_page(seed=3),  # nothing marked
+            make_page(seed=3, finger=True),  # nothing marked; a thumb over the text is not a highlight
         ]
         for i, (img, _) in enumerate(pages, 1):
             cv2.imwrite(str(cls.tmp / f"IMG_{i}.jpg"), cv2.cvtColor(img, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_JPEG_QUALITY, 92])
@@ -61,6 +61,28 @@ class EndToEndTest(unittest.TestCase):
         self.assertEqual((meta["source"], meta["note"]), ("IMG_1.jpg", 1))
         self.assertTrue((out / "manifest.json").exists() and (out / "index.html").exists())
         json.loads((out / "manifest.json").read_text())
+
+    def test_rerun_of_some_photos_keeps_the_others(self):
+        out = Path(self.man["output"])
+        before = sorted(p.name for p in out.glob("*.jpg"))
+        man = process_folder(self.tmp, opts=Options(ocr="none", context=1), files=[self.tmp / "IMG_2.jpg"])
+        after = sorted(p.name for p in out.glob("*.jpg"))
+        self.assertEqual(before, after)
+        self.assertEqual(sorted(s["file"] for s in man["stripes"]), before)
+
+    @unittest.skipUnless(shutil.which("tesseract"), "tesseract not installed")
+    def test_caption_is_the_marked_text(self):
+        tmp = Path(tempfile.mkdtemp(prefix="rc-ocr-"))
+        try:
+            img, truth = make_page(highlight={5: "yellow"}, seed=11)
+            cv2.imwrite(str(tmp / "p.jpg"), cv2.cvtColor(img, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_JPEG_QUALITY, 92])
+            man = process_folder(tmp, opts=Options(ocr="tesseract", context=1))
+            st = man["stripes"][0]
+            self.assertTrue(st["caption"], st)
+            self.assertTrue(st["text"].startswith(st["text"].split()[0]))
+            self.assertLess(len(st["caption"]), len(st["text"]))  # the marked line, not the context lines
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
 
     def test_rerun_replaces_previous_outputs(self):
         out = Path(self.man["output"])
