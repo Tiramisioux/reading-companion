@@ -178,6 +178,15 @@ What a later ingest can rely on (this tool writes nothing into a vault):
   `blue`, `purple`; pen ink `black`/`grey`), so a colour code (yellow = quote, pink = disagree, …)
   can be mapped in the ingest.
 
+The ingest that uses this today is the note-ingest Obsidian plugin (the Finder Quick Action *Note
+ingest: lägg bok i analoga anteckningar* opens its import window). It treats a book you marked as a
+notebook: only the stripes go into the vault, one untagged analog note each, in a collection beside
+the notebooks. Besides the manifest it relies on the command line: `extract <photos…> --out <dir>
+--no-review [--book-title T]` run on parts of about ten photos (each later part with the last two
+photos of the part before, for the chapter), the progress lines `{"progress": 0..1, "file": …}` on
+stderr (its progress bar), the one summary line on stdout (`stripes`, `errors`), and
+`reading_companion.naming.list_images` for the order of the photos in a folder.
+
 ## How it works
 
 1. **Geometry**: ink relative to the local paper lightness; skew by projection-profile

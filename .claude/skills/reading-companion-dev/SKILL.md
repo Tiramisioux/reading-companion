@@ -116,7 +116,12 @@ Work test-first and keep every change deterministic.
 5. **Lock it in.** Move the new scenario from `known_issue` to a plain expectation, or add a
    unit test, so CI guards it. Update the README when user-visible behaviour, options or the
    manifest/ingest contract change: the "For an Obsidian ingest step" section is a contract
-   other tools rely on, so treat field renames there as breaking.
+   other tools rely on, so treat field renames there as breaking. Its consumer is the note-ingest
+   plugin's book import (`~/Documents/note-ingest`, `src/bok-import.ts`, `note_ingest/bok.py`): it
+   also reads the stderr progress lines, the stdout summary (`stripes`, `errors`), `--book-title`
+   and `naming.list_images`, so a change there needs a change there too. In the vault a marked book
+   is a notebook (an analog collection of stripes in `_analoga anteckningar/`, untagged passages,
+   one subproject note in the project); `_källor/scans/böcker/` is for scans of whole books.
 
 Known open issue (recorded as XFAIL scenario `margin-note-owns-only-its-line`): a one-line
 side note with tall loops also takes the line above, because `assign_lines` widens the note's
