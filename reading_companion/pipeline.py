@@ -14,7 +14,7 @@ import cv2
 import numpy as np
 
 from . import __version__
-from .bands import Band, assign_lines, cut_stripe, make_bands
+from .bands import Band, assign_lines, cut_stripe, make_bands, paint_out
 from .geometry import Geometry, build_geometry
 from .imageio import load_rgb, save_stripe
 from .marks import PageAnalysis, analyse
@@ -183,23 +183,52 @@ def row_map(geo: Geometry, r: PrintRow, tight: bool = False) -> Tuple[float, flo
     return r.x0 - padx, r.y0 - pad, padx, f / geo.scale
 
 
-def row_image(src: np.ndarray, geo: Geometry, r: PrintRow, tight: bool = False) -> np.ndarray:
+def row_image(src: np.ndarray, geo: Geometry, r: PrintRow, tight: bool = False, dark: bool = False) -> np.ndarray:
     """Grayscale crop of a printed row at full resolution, scaled to ~48 px letter height. ``tight``: no extra height
-    (a body line, whose band already reaches the gap middles). ``row_map`` gives the crop's place in the flat frame."""
+    (a body line, whose band already reaches the gap middles). ``dark``: a dark highlighter on the line (``dark_highlight``).
+    ``row_map`` gives the crop's place in the flat frame."""
     x0, y0, padx, _ = row_map(geo, r, tight)
     pad = r.y0 - y0
     w = int((r.x1 - r.x0 + 2 * padx) / geo.scale)
     h = int((r.y1 - r.y0 + 2 * pad) / geo.scale)
     mx, my = geo.flat_maps(x0, y0, max(1, w), max(1, h), geo.scale)
     crop = cv2.remap(src, mx, my, interpolation=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
-    g = cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY)
+    # a body line: the brightest channel, where a highlighter of any colour is light and the black print stays dark (in plain
+    # gray a dark red or blue highlight drowns the words it marks)
+    g = crop.max(axis=2) if tight else cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY)
     letter = max(1.0, r.height / geo.scale)
     f = float(np.clip(48.0 / letter, 0.5, 4.0))
     g = cv2.resize(g, None, fx=f, fy=f, interpolation=cv2.INTER_CUBIC)
+    if tight and dark:
+        # under a dark highlighter the letters are only a little darker than the ink around them: each pixel is placed between
+        # the light around it (a closing wider than a stroke, so the highlighter's edge draws no outline) and the darkest
+        # print within a letter's height, so the marked words come out as black as the plain ones
+        bg = cv2.morphologyEx(g, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (17, 17)))
+        bg = cv2.blur(bg, (5, 5)).astype(np.float32)
+        lo = cv2.erode(g, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (49, 49)))
+        lo = cv2.blur(lo, (25, 25)).astype(np.float32)
+        span = np.maximum(bg - lo, 0.35 * bg)
+        g = 1.0 - np.clip((bg - g.astype(np.float32)) / np.maximum(span, 1.0), 0, 1)
+        g = (np.clip((g - 0.1) / 0.8, 0, 1) * 255.0).astype(np.uint8)
+    elif tight:
+        # each pixel against the light around it (a max filter wider than a stroke): the highlight under the words becomes as
+        # white as the paper, and the letters stand out on both
+        bg = cv2.dilate(g, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (17, 17)))
+        bg = cv2.blur(bg, (9, 9)).astype(np.float32)
+        g = np.clip(g.astype(np.float32) / np.maximum(bg, 1.0) * 255.0, 0, 255).astype(np.uint8)
     lo, hi = np.percentile(g, 2), np.percentile(g, 98)
     if hi > lo + 10:
         g = np.clip((g.astype(np.float32) - lo) * (255.0 / (hi - lo)), 0, 255).astype(np.uint8)
     return g
+
+
+def dark_highlight(an: PageAnalysis, geo: Geometry, ln) -> bool:
+    """A dark highlighter (deep red, blue) on the line: much of its band is both tinted and as dark as ink. A light one
+    (yellow, orange, pink) is dark only at its letters' edges."""
+    p = geo.pitch
+    r0, r1 = int(max(0, ln.center - 0.3 * p)), int(ln.center + 0.3 * p) + 1
+    sl = (slice(r0, r1), slice(geo.block.x0, geo.block.x1))
+    return bool((an.tint[sl] & an.ink[sl]).mean() > 0.15)
 
 
 def band_polygon(geo: Geometry, b: Band, n: int = 16) -> List[List[float]]:
@@ -237,7 +266,7 @@ def process_page(path: Path, index: int, engine: OcrEngine, opts: Options) -> Pa
         assign_lines(an, geo.pitch)
         bands = make_bands(an, geo, context=opts.context)
         res.bands, res.geo, res.analysis = bands, geo, an
-        res.stripes = [cut_stripe(src, geo, b) for b in bands]
+        res.stripes = [paint_out(cut_stripe(src, geo, b), an.skin, b) for b in bands]   # fingers holding the book painted out
         res.polygons = [band_polygon(geo, b) for b in bands]
         rows = print_rows(an, geo)
         by_index = {ln.index: ln for ln in an.lines}
@@ -246,7 +275,7 @@ def process_page(path: Path, index: int, engine: OcrEngine, opts: Options) -> Pa
             # one call per page: the rows above and below the text, then the marked body lines
             imgs = [row_image(src, geo, r) for r in rows]
             body = [line_row(an, geo, by_index[i]) for i in wanted]
-            lines = [row_image(src, geo, r, tight=True) for r in body]
+            lines = [row_image(src, geo, r, tight=True, dark=dark_highlight(an, geo, by_index[i])) for i, r in zip(wanted, body)]
             words = engine.read(imgs + lines)
             for r, wds, im in zip(rows, words[:len(rows)], imgs):
                 r.words, r.img_w = wds, int(im.shape[1])
@@ -400,6 +429,7 @@ def process_folder(folder: Path, out_dir: Optional[Path] = None, opts: Optional[
         pages_out.append({
             "index": r.index, "file": r.path.name, "stripes": names, "review": review_name,
             **m.as_dict(), **{k2: v for k2, v in r.info.items() if k2 != "traceback"},
+            "fingers": [list(b) for b in r.analysis.skin_boxes] if r.analysis is not None else [],
             "error": r.error,
         })
     manifest = {

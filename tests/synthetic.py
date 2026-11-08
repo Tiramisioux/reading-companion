@@ -17,7 +17,8 @@ HIGHLIGHTS = {"yellow": (255, 236, 90), "teal": (90, 200, 215), "pink": (250, 15
 def make_page(n_lines: int = 24, highlight: Optional[Dict[int, str]] = None, underline: Tuple[int, ...] = (),
               margin_line: Optional[Tuple[int, int]] = None, note_beside: Optional[int] = None,
               head: str = "224          WAYFINDING", angle: float = 0.0, seed: int = 3,
-              width: int = 1500, height: int = 2000) -> Tuple[np.ndarray, Dict]:
+              width: int = 1500, height: int = 2000, underline_color: Optional[Tuple[int, int, int]] = None,
+              finger: Optional[Tuple[int, int]] = None) -> Tuple[np.ndarray, Dict]:
     """RGB page photo-like image and the truth: {"lines": [(y_center, x0, x1)], ...}.
     ``highlight`` maps 1-based line -> colour name."""
     rng = np.random.default_rng(seed)
@@ -59,10 +60,14 @@ def make_page(n_lines: int = 24, highlight: Optional[Dict[int, str]] = None, und
         c = np.array(HIGHLIGHTS[colour], np.float32) / 255.0
         hl[yc - 20:yc + 16, a - 6:b + 6] = c
     img = img * hl
-    # underlines (pen)
+    # underlines (pen; black, or a coloured pen drawn over the page)
+    pen = np.zeros((height, width), np.uint8)
     for ln in underline:
         yc, a, b = lines[ln - 1]
-        cv2.line(ink, (a + 40, yc + 20), (min(b, a + 600), yc + 23), 255, 3, cv2.LINE_AA)
+        cv2.line(ink if underline_color is None else pen, (a + 40, yc + 20), (min(b, a + 600), yc + 23), 255, 3, cv2.LINE_AA)
+    if underline_color is not None:
+        r = (pen.astype(np.float32) / 255.0)[..., None]
+        img = img * (1 - r) + np.array(underline_color, np.float32) * r
     # red margin line beside lines a..b
     if margin_line:
         ya = lines[margin_line[0] - 1][0] - 22
@@ -83,6 +88,17 @@ def make_page(n_lines: int = 24, highlight: Optional[Dict[int, str]] = None, und
         cv2.polylines(ink, [np.array(pts, np.int32)], False, 255, 3, cv2.LINE_AA)
     a = (ink.astype(np.float32) / 255.0)[..., None]
     img = img * (1 - a) + np.array([35, 33, 30], np.float32) * a
+    # a finger holding the page beside lines a..b: it comes in over the page's right edge from the table beyond it
+    if finger:
+        edge = x1 + 120
+        img[:, edge:] = np.array([58, 56, 62], np.float32)
+        ya = lines[finger[0] - 1][0] - 30
+        yb = lines[finger[1] - 1][0] + 30
+        skin = np.zeros((height, width), np.uint8)
+        cv2.ellipse(skin, ((width + x1 - 40) // 2, (ya + yb) // 2), ((width - x1 + 120) // 2, (yb - ya) // 2), 0, 0, 360, 255, -1)
+        shade = np.linspace(0.75, 1.0, width, dtype=np.float32)[None, :, None]
+        s_ = (cv2.GaussianBlur(skin, (0, 0), 3).astype(np.float32) / 255.0)[..., None]
+        img = img * (1 - s_) + np.array([196, 132, 98], np.float32) * shade * s_
     img = np.clip(img, 0, 255).astype(np.uint8)
     if angle:
         M = cv2.getRotationMatrix2D((width / 2, height / 2), angle, 1.0)

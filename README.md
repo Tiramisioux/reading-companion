@@ -27,6 +27,15 @@ img_2004_note1.jpg                (no page number printed on the photo)
 Not marks: bleed-through from the other side of the leaf, the facing page, fingers, shadows,
 printed rules, the running head and page number.
 
+### Fingers holding the book
+
+A finger or thumb holding the page open is skin-coloured (a warm hue of moderate saturation, which most highlighters
+exceed) and **cut off by the page edge**: it comes in from beyond the paper. Such a blob is never a mark, however tall,
+and it is **painted out of the stripes** (filled with the paper colour of its rows, blended at the edge), so a stripe
+shows the page without the hand. A highlight a thumb rests on stays a highlight. A tall highlight that ends inside the
+page is still a highlight; only a blob that runs off the page, or a tint right against a finger (its shadow), is not.
+Where the fingers were is in the manifest (`pages[].fingers`, boxes in the straightened frame).
+
 ## Stripe rules
 
 - Marks on **consecutive printed lines are one stripe**, whatever their colour or kind (two
@@ -56,6 +65,10 @@ manifest (`text`, `passage`) and inside the JPEG (`passage` in the EXIF `UserCom
   whole line;
 - `text` is the list `[{"line": 5, "text": "…"}]` (printed line numbers of the page), `passage` the lines joined
   (a word broken with a hyphen at a line end is mended; a gap between marked lines is ` … `). `null` when no OCR ran.
+- each line is read from its **brightest colour channel**, each pixel against the light around it, so a highlighter of
+  any colour reads as paper; under a **dark** highlighter (deep red, blue: much of the line both tinted and as dark as
+  ink) the letters are also stretched against the darkest print near them, as they are only a little darker than the
+  highlighter itself.
 
 Apple Vision gives a box per word; with Tesseract the words come with their own boxes as well.
 
@@ -144,7 +157,8 @@ What a later ingest can rely on (this tool writes nothing into a vault):
   `kinds`, `colors`, `marks[]`, `size`, `text` / `passage` (the marked words, see above),
   `source_polygon` (where the stripe sits on the photo).
 - `manifest.json` → `pages[]`: per photo what was read (page number, running head, chapter,
-  OCR rows), its stripes, skew and line pitch, and `error` when a photo could not be read.
+  OCR rows), its stripes, skew and line pitch, `fingers` (where a hand held the page, painted
+  out of the stripes), and `error` when a photo could not be read.
 - Each stripe JPEG carries the same record (EXIF `UserComment`, read it with
   `reading_companion.imageio.read_stripe_meta`) and a readable summary (EXIF
   `ImageDescription`, XMP `dc:description`), so a stripe moved out of its folder still knows
@@ -163,12 +177,13 @@ What a later ingest can rely on (this tool writes nothing into a vault):
    and lamp light all become neutral paper; highlighter keeps its tint; bleed-through stays
    near neutral).
 3. **Layout**: printed lines (checked by their letter texture, so keyboards and shadow edges are
-   not lines), the running head, the column edges (they may slant with perspective), the page
+   not lines; thin pen rules are taken out first, so three underlined lines stay three lines, and
+   under a dark highlighter the letters are what is darker than the highlighter beside them), the running head, the column edges (they may slant with perspective), the page
    edges and the gutter.
-4. **Marks**: highlight, underline, margin line and note detectors (above), each mark assigned
-   to the printed lines it touches.
+4. **Marks**: fingers first (skin colour cut off by the page edge), then the highlight, underline,
+   margin line and note detectors (above), each mark assigned to the printed lines it touches.
 5. **Stripes**: consecutive marked lines grouped, context lines added, cut from the
-   full-resolution photo through the straightening map.
+   full-resolution photo through the straightening map, fingers painted out.
 6. **Metadata**: OCR of the printed rows above and below the text; then the folder is read as
    one book (book title, chapter numbers and titles, neighbouring pages).
 
@@ -197,6 +212,10 @@ Photos of book pages are copyrighted: keep them and their ground truth out of th
 - Pencil (light grey) notes are fainter than the ink threshold and may be missed.
 - One page per photo: on a two-page spread only the larger/denser page is processed.
 - Apple Vision OCR is built and run on macOS only; the tests use Tesseract or none.
+- Words under a very dark highlighter (deep red) are read less reliably than plain print; the
+  stripe itself always shows them.
+- A finger is found by colour: a glove, or a hand in coloured light, is not recognised; a skin
+  blob that does not reach the page edge is left alone.
 
 ## License
 

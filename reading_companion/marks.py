@@ -116,6 +116,8 @@ class PageAnalysis:
     margin_groups: List["InkGroup"] = field(default_factory=list)  # every ink group in the top/bottom margins
     zones: dict = field(default_factory=dict)
     letter_h: float = 0.0       # median height of the body text's letters (flat px)
+    skin: Optional[np.ndarray] = None        # fingers / a hand holding the book (flat px), painted out of the stripes
+    skin_boxes: List[Tuple[int, int, int, int]] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -226,11 +228,22 @@ def fill_holes(mask: np.ndarray) -> np.ndarray:
 # text lines
 # ---------------------------------------------------------------------------
 
-def text_lines(ink: np.ndarray, x0: int, x1: int, y0: int, y1: int, pitch: float) -> List[TextLine]:
-    """Printed lines between rows y0..y1 inside columns x0..x1 (lines are horizontal here)."""
+def text_lines(ink: np.ndarray, x0: int, x1: int, y0: int, y1: int, pitch: float,
+               tint: Optional[np.ndarray] = None) -> List[TextLine]:
+    """Printed lines between rows y0..y1 inside columns x0..x1 (lines are horizontal here). ``tint``: the coloured pixels, so
+    that a coloured pen's underline is known as one too."""
     h = ink.shape[0]
     lo, hi = max(0, int(y0 - pitch)), min(h, int(y1 + pitch))
-    prof = ink[lo:hi, x0:x1].sum(axis=1).astype(np.float64)
+    sub = ink[lo:hi, x0:x1].astype(np.uint8)
+    # a long, thin horizontal run is a rule (a pen's underline, black or coloured), not letters: left in, a page underlined on
+    # three lines in a row has rules stronger than the text between them, and a line's own peak is lost. A highlighter's band is
+    # long too but thick, and the print under it stays
+    pen = sub | tint[lo:hi, x0:x1].astype(np.uint8) if tint is not None else sub
+    k = max(5, int(round(pitch * 1.5)))
+    rules = cv2.morphologyEx(pen, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (k, 1)))
+    thick = cv2.morphologyEx(rules, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (1, odd(max(3, pitch * 0.6)))))
+    thin = cv2.dilate(rules & (1 - thick), np.ones((3, 1), np.uint8))
+    prof = (sub & (1 - thin)).sum(axis=1).astype(np.float64)
     prof = smooth1d(prof, max(1.0, pitch * 0.1))
     if prof.max() <= 0:
         return []
@@ -924,6 +937,77 @@ def _on_lines(an: "PageAnalysis", y0: float, y1: float, p: float) -> bool:
     return any(min(y1, ln.center + 0.25 * p) - max(y0, ln.center - 0.25 * p) > 0.2 * p for ln in an.lines)
 
 
+def _off_page(an: "PageAnalysis", lay: "Layout", x: int, y: int, comp: np.ndarray, p: float) -> bool:
+    """A tinted blob that is cut off by the page's edge and runs on beyond it: a finger or a hand holding the book. A highlight,
+    however tall, ends on the paper; this one reaches the page edge and the tint goes on past it (over several rows or columns)."""
+    h, w = an.tint.shape
+    reach = max(3, int(0.3 * p))
+    hh, ww = comp.shape
+    on = 0
+    for k in range(hh):
+        cols = np.nonzero(comp[k])[0]
+        if cols.size == 0:
+            continue
+        r = y + k
+        left, right = int(lay.page_l[r]), int(lay.page_r[r])
+        if x + cols.max() >= right - 2 and an.tint[r, right:min(w, right + reach)].mean() > 0.5:
+            on += 1
+        elif x + cols.min() <= left + 2 and left > 0 and an.tint[r, max(0, left - reach):left].mean() > 0.5:
+            on += 1
+    if on >= max(2, 0.25 * p):
+        return True
+    for k in range(ww):                                   # a thumb on the top or bottom edge
+        rows = np.nonzero(comp[:, k])[0]
+        if rows.size == 0:
+            continue
+        c = x + k
+        if y + rows.max() >= lay.page_bottom - 2 and an.tint[lay.page_bottom:min(h, lay.page_bottom + reach), c].mean() > 0.5:
+            on += 1
+        elif y + rows.min() <= lay.page_top + 2 and lay.page_top > 0 and an.tint[max(0, lay.page_top - reach):lay.page_top, c].mean() > 0.5:
+            on += 1
+    return on >= max(2, 0.25 * p)
+
+
+def skin_coloured(hue, chroma):
+    """Warm and moderately saturated, as skin is in any light; a highlighter is far more saturated (works on arrays too)."""
+    return ((hue < 75.0) | (hue > 340.0)) & (chroma > 8.0) & (chroma < 48.0)
+
+
+def find_skin(an: "PageAnalysis", p: float) -> None:
+    """Fill an.skin: the fingers (or the hand) holding the book, found before the marks so that a highlight a thumb touches keeps
+    its own pixels, and so the stripes can be cleaned. Skin is warm, moderately saturated and thick: an opening as wide as a line
+    leaves it and removes highlight bands, pen strokes and print; what remains must be cut off by the page's edge and go on past
+    it (``_off_page``)."""
+    lay = an.layout
+    h, w = an.Lw.shape
+    an.skin = np.zeros((h, w), bool)
+    an.skin_boxes = []
+    if lay is None:
+        return
+    C = np.hypot(an.aw, an.bw)
+    hue = (np.degrees(np.arctan2(an.bw, an.aw)) + 360.0) % 360.0
+    warm = (skin_coloured(hue, C) & (an.Lw < 88.0) & an.valid).astype(np.uint8)
+    kc = odd(max(3, p * 0.2))
+    warm = cv2.morphologyEx(warm, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kc, kc)))
+    ko = odd(max(5, p * 0.95))
+    core = cv2.morphologyEx(warm, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ko, ko)))
+    n, lab, stats, _ = cv2.connectedComponentsWithStats(core, connectivity=8)
+    for i in range(1, n):
+        x, y, ww, hh, area = stats[i]
+        if area < (0.8 * p) ** 2:
+            continue
+        sl = (slice(y, y + hh), slice(x, x + ww))
+        comp = lab[sl] == i
+        if not _off_page(an, lay, x, y, comp & an.tint[sl], p):
+            continue
+        an.skin[sl] |= fill_holes(comp)
+        an.skin_boxes.append((int(x), int(y), int(x + ww), int(y + hh)))
+    if an.skin.any():                                     # the opening shaved the finger's rim: grow it back over warm pixels only
+        d = odd(max(3, p * 0.3))
+        grown = cv2.dilate(an.skin.astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (d, d))) > 0
+        an.skin = cv2.dilate(((grown & (warm > 0)) | an.skin).astype(np.uint8), np.ones((3, 3), np.uint8)) > 0
+
+
 def detect_marks(an: "PageAnalysis", geo: Geometry, segs: List[Segment]) -> None:
     """Fill an.marks (and an.rejected, for the review sheet)."""
     p = geo.pitch
@@ -944,8 +1028,12 @@ def detect_marks(an: "PageAnalysis", geo: Geometry, segs: List[Segment]) -> None
     marks: List[Mark] = []
     rejected: List[Mark] = []
 
+    find_skin(an, p)
+
     # ---- tinted strokes on the printed lines: highlights (and coloured underlines) ---------------
-    tint = an.tint & search
+    tint = an.tint & search & ~an.skin
+    ks = odd(max(3, p * 0.3))
+    near_skin = cv2.dilate(an.skin.astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ks, ks))) > 0
     ko = odd(max(3, p * 0.07))
     tint = cv2.morphologyEx(tint.astype(np.uint8), cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ko, ko))) > 0
     kc = (odd(max(3, p * 0.45)), odd(max(3, p * 0.18)))
@@ -962,6 +1050,14 @@ def detect_marks(an: "PageAnalysis", geo: Geometry, segs: List[Segment]) -> None
         m = _mark("highlight", x, y, x + ww, y + hh, L_, C_, H_, rgb, sel.sum())
         if hh >= 1.0 * p and ww <= 0.6 * p and hh >= 2.5 * ww:
             continue  # a vertical coloured stroke: a margin line (handled below)
+        if skin_coloured(H_, C_) and _off_page(an, lay, x, y, sel, p):
+            m.why = "cut off by the page edge (a finger?)"
+            rejected.append(m)
+            continue
+        if hh > ww and near_skin[sl][comp].any():
+            m.why = "a tall tint against a finger (its shadow)"
+            rejected.append(m)
+            continue
         inside = float(textzone[sl][comp].mean())
         if ww >= 2.0 * p and hh <= 0.35 * p and L_ < 70:
             m.kind = "underline"
@@ -1125,8 +1221,13 @@ def analyse(flat: np.ndarray, geo: Geometry) -> PageAnalysis:
     lab = cv2.cvtColor(flat, cv2.COLOR_RGB2LAB)
     an.L = lab[..., 0].astype(np.float32) * (100.0 / 255.0)
     blk = geo.block
-    cand = text_lines(ink & valid, blk.x0, blk.x1, blk.y0, blk.y1, geo.pitch)
-    an.lines, an.head_lines = validate_lines(cand, ink & valid, blk, geo.pitch)
+    cand = text_lines(ink & valid, blk.x0, blk.x1, blk.y0, blk.y1, geo.pitch, tint)
+    # the texture test on the print alone: under a dark highlighter the whole band is "ink"; its letters are what is clearly
+    # darker, in the brightest channel, than the band beside them on the same rows
+    V = flat.max(axis=2)
+    band = cv2.dilate(V, cv2.getStructuringElement(cv2.MORPH_RECT, (odd(geo.pitch), 3))).astype(np.float32)
+    letters = (ink & ~tint) | (tint & (V < 0.75 * band))
+    an.lines, an.head_lines = validate_lines(cand, letters & valid, blk, geo.pitch)
     lay, segs = build_layout(an, geo)
     an.layout = lay
     an.letter_h = body_letter_height(ink, an.lines, blk, geo.pitch)

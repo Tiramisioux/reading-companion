@@ -224,3 +224,38 @@ def cut_stripe(src: np.ndarray, geo: Geometry, band: Band) -> np.ndarray:
     h_out = int(round((band.y1 - band.y0) / step))
     mx, my = geo.flat_maps(band.x0, band.y0, max(1, w_out), max(1, h_out), step)
     return cv2.remap(src, mx, my, interpolation=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
+
+
+def paint_out(stripe: np.ndarray, mask: Optional[np.ndarray], band: Band) -> np.ndarray:
+    """The stripe with the masked pixels (fingers holding the book, flat-frame ``mask``) painted over with the paper beside them:
+    per row the colour of the brightest free pixels, smoothed down the stripe, blended in over a soft edge."""
+    if mask is None:
+        return stripe
+    sub = mask[int(band.y0):int(band.y1) + 1, int(band.x0):int(band.x1) + 1]
+    if sub.size == 0 or not sub.any():
+        return stripe
+    h, w = stripe.shape[:2]
+    soft = cv2.resize(sub.astype(np.float32), (w, h), interpolation=cv2.INTER_LINEAR)
+    hard = soft > 0.5
+    if not hard.any() or hard.all():
+        return stripe
+    img = stripe.astype(np.float32)
+    gray = img.mean(axis=2)
+    free = ~hard
+    ref = img[free & (gray >= np.percentile(gray[free], 60))]
+    fallback = np.median(ref, axis=0) if ref.size else np.array([235.0, 230.0, 220.0], np.float32)
+    paper = np.empty((h, 1, 3), np.float32)
+    for r in range(h):
+        sel = free[r]
+        if sel.sum() >= 8:
+            g = gray[r][sel]
+            px = img[r][sel]
+            paper[r, 0] = np.median(px[g >= np.percentile(g, 60)], axis=0)
+        else:
+            paper[r, 0] = fallback
+    k = max(3, (h // 6) | 1)
+    paper = cv2.GaussianBlur(paper, (1, k), 0).reshape(h, 1, 3)
+    edge = max(1.0, 0.004 * w)
+    alpha = np.maximum(hard.astype(np.float32), cv2.GaussianBlur(hard.astype(np.float32), (0, 0), edge))[..., None]
+    out = img * (1.0 - alpha) + paper * alpha
+    return np.clip(out + 0.5, 0, 255).astype(np.uint8)
