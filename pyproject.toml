@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "reading-companion"
+version = "0.1.0"
+description = "Cut the passages you marked in photographed book pages into stripes, with page and chapter in the file names."
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = ["numpy>=1.22", "opencv-python-headless>=4.7", "Pillow>=10.0"]
+
+[project.optional-dependencies]
+heif = ["pillow-heif>=0.13"]
+
+[project.scripts]
+reading-companion = "reading_companion.cli:main"
+
+[tool.setuptools]
+packages = ["reading_companion", "reading_companion.ocr"]
+
+[tool.setuptools.package-data]
+"reading_companion.ocr" = ["rc_vision.swift"]
